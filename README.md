@@ -1,47 +1,52 @@
-# 🚀 Mag7 Research Terminal & Strategic Optimizer
+# 📈 Mag7 Quant Research Terminal & Portfolio Optimizer
 
-An interactive Quant-Finance dashboard built to analyze, compare, and optimize the "Magnificent 7" technology equities (AAPL, MSFT, GOOGL, AMZN, NVDA, META, TSLA). 
+An end-to-end financial analytics dashboard built to analyze, compare, and optimize the **"Magnificent 7"** equities (AAPL, MSFT, GOOGL, AMZN, NVDA, META, TSLA). 
 
-This application bridges the gap between **Fundamental Equity Research** and **Modern Portfolio Theory (MPT)** by allowing users to simulate forward-looking market scenarios.
+This tool integrates live market data with **Mean-Variance Optimization (MVO)** to provide both descriptive insights and predictive strategic allocations.
 
 ---
 
-## 📊 Core Features
+## 🚀 Key Features
 
-### 1. Equity Research Terminal
-* **Real-time Ingestion:** Integrated with the Yahoo Finance API to pull live pricing and corporate metadata.
-* **Fundamental Analysis:** Displays TTM PE Ratios, Beta (5Y Monthly), EPS, and 1Y Analyst Target Estimates.
-* **Event Tracking:** Dynamic monitoring of upcoming Earnings Dates and Ex-Dividend dates.
+### 1. Equity Research & Volatility Alerts
+* **Real-time Fundamentals:** Tracks Market Cap, P/E Ratios, Beta, and 1Y Target Estimates via `yfinance`.
+* **Earnings Monitor:** High-visibility alerts for upcoming earnings dates to signal periods of expected high volatility.
 
 ### 2. Relative Performance Comparison
-* **Vectorized Normalization:** Uses a "Base 100" rebasing technique to compare the growth of $100 across different stock price scales.
-* **Interactive Visuals:** Built with Plotly for x-unified hovering and detailed time-series exploration.
+* **Vectorized Normalization:** Rebase all 7 stocks to a "Base 100" starting point to compare true percentage growth across different price scales.
+* **Interactive Time-Series:** Dynamic Plotly charts for granular historical analysis.
 
-### 3. Strategic Portfolio Optimizer
-* **Mean-Variance Optimization (MVO):** Implements the Markowitz framework to find the "Tangency Portfolio."
-* **Scenario Simulator:** A custom-built engine allowing users to input their own "Expected Returns" to see how the model reallocates capital to maximize the **Sharpe Ratio**.
-* **Risk Metrics:** Calculates expected Annual Return, Volatility (Risk), and risk-adjusted performance.
+### 3. Strategic Portfolio Optimizer (Scenario Simulator)
+* **Markowitz Framework:** Calculates the **Maximum Sharpe Ratio** portfolio using the `PyPortfolioOpt` engine.
+* **Active View Simulation:** Allows users to input custom **Expected Returns (%)** to see how the mathematical "optimal" weights shift in real-time.
+
+### 4. Risk Diagnostics (Correlation Heatmap)
+* **Systemic Risk Analysis:** A daily-return correlation matrix to identify sector concentration and diversification gaps within the Mag7.
 
 ---
 
-## 🛠️ Technical Stack
+## 🛠️ Tech Stack
 
 * **Language:** Python 3.11+
-* **Framework:** [Streamlit](https://streamlit.io/) (Web UI)
-* **Data Science:** Pandas, NumPy
-* **Finance Logic:** [PyPortfolioOpt](https://github.com/robertmartin8/PyPortfolioOpt) (Quadratic Programming)
-* **Visualization:** Plotly Open-Source Graphing Library
-* **API:** yfinance (Real-time market data)
+* **Framework:** Streamlit (Web UI)
+* **Optimization:** PyPortfolioOpt (Quadratic Programming)
+* **Data Science:** Pandas, NumPy, Scikit-Learn
+* **Visualization:** Plotly, Seaborn, Matplotlib
 
 ---
 
-## 🚀 Getting Started
+## 📂 Project Structure
 
-### Local Installation
-1. **Clone the repository:**
-   ```bash
-   git clone [https://github.com/your-username/mag7-optimizer.git](https://github.com/your-username/mag7-optimizer.git)
-   cd mag7-optimizer
+- `src/app.py`: Main application logic and Streamlit UI.
+- `requirements.txt`: Project dependencies.
+- `README.md`: Project documentation and financial logic overview.
 
 ---
-*Developed by Truc Nguyen, MSFinMath, MSc candidate in AI - Data Analytics specialization, Product Support Specialist & Knowledge Lead at Moody's Analytics, Inc.*
+
+## 💡 Financial Engineering Insights
+This project demonstrates the **"Instability Problem"** of Mean-Variance Optimization. By using the **Scenario Simulator**, users can see how sensitive the Efficient Frontier is to changes in expected return inputs—a core concept in institutional Asset-Liability Management (ALM).
+
+---
+
+## 👤 Author
+**Truc Nguyen** *Product Support Specialist in Financial Engineering | M.S. Finance | M.S. AI & Data Analytics Candidate*

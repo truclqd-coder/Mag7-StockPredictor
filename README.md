@@ -21,3 +21,6 @@ An end-to-end data science application that tracks, analyzes, and predicts the f
 1. **Clone the repository**
    ```bash
    git clone [https://github.com/YOUR_USERNAME/Mag7-Predictor.git](https://github.com/YOUR_USERNAME/Mag7-Predictor.git)
+
+---
+*Developed by Truc Nguyen, MSFinMath, MSc candidate in AI - Data Analytics specialization, Product Support Specialist & Knowledge Lead at Moody's Analytics, Inc.*

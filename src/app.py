@@ -4,9 +4,6 @@ import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
 import plotly.express as px
-from requests import Session
-from requests.adapters import HTTPAdapter
-from urllib3.util import Retry
 
 # Attempt to import optimization library
 try:
@@ -26,41 +23,22 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# --- Hardened Data Engine ---
-def get_session():
-    session = Session()
-    # Spoof browser to bypass Yahoo Rate Limits
-    session.headers.update({
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-    })
-    retries = Retry(total=3, backoff_factor=1, status_forcelist=[429, 500, 502, 503, 504])
-    session.mount('https://', HTTPAdapter(max_retries=retries))
-    return session
-
-custom_session = get_session()
-
+# --- Data Engine (Let yfinance handle the session internally) ---
 @st.cache_data(ttl=3600)
 def fetch_global_data(ticker_list):
-    # Download 5 years of daily close prices
-    prices = yf.download(ticker_list, period="5y", multi_level_index=False, session=custom_session)['Close']
+    # DOWNLOAD: No manual session passed here anymore
+    prices = yf.download(ticker_list, period="5y", multi_level_index=False)['Close']
     
-    # Metadata Scraper for all tickers
     meta_store = {}
     for t in ticker_list:
-        obj = yf.Ticker(t, session=custom_session)
+        obj = yf.Ticker(t)
         info = obj.info
         
-        # Triple-Layer Earnings Date Fix
+        # Earnings Date Fix
         e_date = "N/A"
         raw_ts = info.get('earningsTimestamp') or info.get('nextEarningsDate')
         if raw_ts:
             e_date = pd.to_datetime(raw_ts, unit='s').strftime('%Y-%m-%d')
-        if e_date == "N/A":
-            try:
-                e_df = obj.get_earnings_dates(limit=1)
-                if e_df is not None and not e_df.empty:
-                    e_date = e_df.index[0].strftime('%Y-%m-%d')
-            except: pass
         
         meta_store[t] = {
             "Market Cap": info.get('marketCap', 0),
@@ -107,8 +85,6 @@ with tab1:
 # --- TAB 2: Mag7 Comparison ---
 with tab2:
     st.subheader("Sector-Wide Benchmarking")
-    
-    # Growth Chart
     choice2 = st.radio("Comparison Window:", list(tf_map.keys()), index=1, horizontal=True, key="c_tf")
     comp_df = all_close.tail(tf_map[choice2])
     norm_df = (comp_df / comp_df.iloc[0]) * 100
@@ -118,8 +94,6 @@ with tab2:
     st.plotly_chart(fig_comp, use_container_width=True)
     
     st.divider()
-    
-    # Comparison Table
     compare_rows = []
     for t in tickers:
         m = all_meta[t]
@@ -135,13 +109,10 @@ with tab2:
 # --- TAB 3: Strategic Optimizer ---
 with tab3:
     if not OPTIMIZER_AVAILABLE:
-        st.error("PyPortfolioOpt is not installed. Please check your requirements.txt")
+        st.error("PyPortfolioOpt is not installed.")
     else:
         st.subheader("Mean-Variance Portfolio Strategy")
-        st.info("💡 Diversification Guardrail: Max 40% per asset.")
-        
         c_in, c_out = st.columns([1, 2])
-        
         with c_in:
             st.write("### 1. Market Convictions")
             mu_hist = expected_returns.mean_historical_return(all_close)
@@ -151,38 +122,27 @@ with tab3:
             
             st.write("### 2. Allocation Logic")
             target_p = st.slider("Target Portfolio Return %", 5, 100, 25)
-            mode = st.toggle("Maximize Sharpe Ratio (Auto-Optimized)", value=False)
+            mode = st.toggle("Maximize Sharpe Ratio", value=False)
 
         with c_out:
             try:
                 mu = pd.Series({t: v/100 for t, v in user_views.items()})
                 S = risk_models.sample_cov(all_close)
                 ef = EfficientFrontier(mu, S)
-                ef.add_constraint(lambda w: w <= 0.40) # Max 40% per stock
+                ef.add_constraint(lambda w: w <= 0.40)
                 
-                if mode:
-                    weights = ef.max_sharpe()
-                    res_title = "Maximized Risk-Adjusted Returns"
-                else:
-                    weights = ef.efficient_return(target_return=target_p/100)
-                    res_title = f"Minimizing Risk for {target_p}% Return"
-                
+                weights = ef.max_sharpe() if mode else ef.efficient_return(target_return=target_p/100)
                 cleaned = ef.clean_weights()
                 ret, vol, sha = ef.portfolio_performance()
                 
-                # Metrics Row
                 m1, m2, m3 = st.columns(3)
                 m1.metric("Exp. Return", f"{ret:.1%}")
-                m2.metric("Volatility (Risk)", f"{vol:.1%}")
+                m2.metric("Volatility", f"{vol:.1%}")
                 m3.metric("Sharpe Ratio", f"{sha:.2f}")
                 
-                # Visuals
                 fig_pie = px.pie(names=list(cleaned.keys()), values=list(cleaned.values()), 
-                                 hole=0.5, template="plotly_dark", title=res_title)
+                                 hole=0.5, template="plotly_dark", title="Optimal Allocation")
                 st.plotly_chart(fig_pie)
-                
-                st.write("#### Recommended Allocation Table")
                 st.table(pd.Series(cleaned, name="Weight").apply(lambda x: f"{x:.1%}" if x > 0 else "0%"))
-                
             except Exception as e:
-                st.warning("Mathematical Constraint Warning: That specific return target cannot be reached with the current stock forecasts. Please lower the target or increase expected returns.")
+                st.warning("No valid portfolio for that target.")

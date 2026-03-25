@@ -4,5 +4,4 @@ pandas
 numpy
 plotly
 PyPortfolioOpt
-requests
-urllib3
+curl_cffi

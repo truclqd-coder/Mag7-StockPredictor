@@ -25,36 +25,21 @@ selected_ticker = st.sidebar.selectbox("Primary Focus Ticker", tickers)
 # --- HARDENED EARNINGS ENGINE ---
 @st.cache_data(ttl=3600)
 def fetch_terminal_data(ticker_list, focus_ticker):
-    # Historical Prices
     all_data = yf.download(ticker_list, period="5y", multi_level_index=False)['Close']
-    
-    # Metadata
     focus_obj = yf.Ticker(focus_ticker)
     info = focus_obj.info
     
-    # Logic to find the date across 4 potential Yahoo Finance locations
     next_e = "N/A"
     try:
-        # 1. Check get_earnings_dates()
-        e_dates = focus_obj.get_earnings_dates(limit=1)
-        if e_dates is not None and not e_dates.empty:
-            next_e = e_dates.index[0].strftime('%Y-%m-%d')
-        
-        # 2. Check calendar attribute
+        raw_ts = info.get('earningsTimestamp') or info.get('nextEarningsDate')
+        if raw_ts:
+            next_e = pd.to_datetime(raw_ts, unit='s').strftime('%Y-%m-%d')
         if next_e == "N/A":
-            cal = focus_obj.calendar
-            if isinstance(cal, pd.DataFrame) and not cal.empty:
-                next_e = cal.iloc[0, 0].strftime('%Y-%m-%d')
-            elif isinstance(cal, dict) and 'Earnings Date' in cal:
-                next_e = cal['Earnings Date'][0].strftime('%Y-%m-%d')
-
-        # 3. Check info dictionary (Raw Timestamp)
-        if next_e == "N/A":
-            raw_ts = info.get('nextEarningsDate')
-            if raw_ts:
-                next_e = pd.to_datetime(raw_ts, unit='s').strftime('%Y-%m-%d')
+            e_df = focus_obj.get_earnings_dates(limit=1)
+            if e_df is not None and not e_df.empty:
+                next_e = e_df.index[0].strftime('%Y-%m-%d')
     except:
-        next_e = "Check Investor Relations"
+        next_e = "Check IR Calendar"
         
     return all_data, info, next_e
 
@@ -68,72 +53,19 @@ tab1, tab2, tab3 = st.tabs(["📊 Research", "🔄 Performance", "⚖️ Optimiz
 with tab1:
     col_l, col_r = st.columns([2, 1])
     with col_l:
-        # Timeframe Selector directly above chart
-        choice1 = st.radio("Chart Period:", ["1M", "3M", "6M", "1Y", "5Y"], index=1, horizontal=True, key="r_chart")
-        window1 = tf_map[choice1]
-
-        plot_df = all_close[selected_ticker].tail(window1)
-        fig_price = px.line(plot_df, template="plotly_dark", title=f"{selected_ticker} Performance ({choice1})")
+        choice1 = st.radio("Chart Window:", ["1M", "3M", "6M", "1Y", "5Y"], index=1, horizontal=True, key="r_chart")
+        plot_df = all_close[selected_ticker].tail(tf_map[choice1])
+        fig_price = px.line(plot_df, template="plotly_dark", title=f"{selected_ticker} ({choice1})")
         fig_price.update_layout(xaxis_title=None, yaxis_title="Price ($)")
         st.plotly_chart(fig_price, use_container_width=True)
     
     with col_r:
         st.subheader("Key Statistics")
-        # Ensure the value is bold and stands out
-        st.metric(label="⚠️ Next Earnings (Volatility Alert)", value=e_date)
+        st.error(f"⚠️ Next Earnings: **{e_date}**")
         st.divider()
         st.metric("Market Cap", f"${main_info.get('marketCap', 0):,.0f}")
         st.metric("P/E Ratio", main_info.get('trailingPE', 'N/A'))
         st.metric("Beta (5Y)", main_info.get('beta', 'N/A'))
         st.metric("1Y Target", f"${main_info.get('targetMeanPrice', 'N/A')}")
 
-# --- TAB 2: Performance Comparison ---
-with tab2:
-    choice2 = st.radio("Comparison Period:", ["1M", "3M", "6M", "1Y", "5Y"], index=1, horizontal=True, key="p_chart")
-    window2 = tf_map[choice2]
-    
-    comp_df = all_close.tail(window2)
-    norm_df = (comp_df / comp_df.iloc[0]) * 100
-    
-    fig_comp = go.Figure()
-    for t in tickers:
-        fig_comp.add_trace(go.Scatter(
-            x=norm_df.index, y=norm_df[t], name=t,
-            line=dict(width=4 if t == selected_ticker else 1, color='white' if t == selected_ticker else None),
-            opacity=1 if t == selected_ticker else 0.5
-        ))
-    fig_comp.update_layout(template="plotly_dark", title=f"Mag7 Relative Growth ({choice2})", yaxis_title="Base 100")
-    st.plotly_chart(fig_comp, use_container_width=True)
-
-# --- TAB 3: Strategic Optimizer ---
-with tab3:
-    st.subheader("Mean-Variance Scenario Simulator")
-    st.info("💡 Constraints: Max 40% per stock to prevent concentration risk.")
-    
-    mu_hist = expected_returns.mean_historical_return(all_close)
-    S = risk_models.sample_cov(all_close)
-    
-    in_cols = st.columns(len(tickers))
-    views = {t: in_cols[i].number_input(f"{t} %", value=float(mu_hist[t]*100), step=1.0) for i, t in enumerate(tickers)}
-    
-    try:
-        custom_mu = pd.Series({t: v/100 for t, v in views.items()})
-        ef = EfficientFrontier(custom_mu, S)
-        ef.add_constraint(lambda w: w <= 0.40) 
-        
-        weights = ef.max_sharpe()
-        cleaned = ef.clean_weights()
-        ret, vol, sha = ef.portfolio_performance()
-        
-        c1, c2 = st.columns([1, 2])
-        with c1:
-            st.write("### Optimal Weights")
-            st.table(pd.Series({k: v for k, v in cleaned.items() if v > 0}, name="Allocation").apply(lambda x: f"{x:.1%}"))
-            st.metric("Expected Return", f"{ret:.1%}")
-            st.metric("Sharpe Ratio", f"{sha:.2f}")
-        with c2:
-            fig_pie = px.pie(names=list(cleaned.keys()), values=list(cleaned.values()), hole=0.4, 
-                             template="plotly_dark", title="Recommended Portfolio Mix")
-            st.plotly_chart(fig_pie, use_container_width=True)
-    except:
-        st.error("Model Error: Ensure at least one positive return estimate.")
+# --- TAB 2: Performance Comparison

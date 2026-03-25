@@ -63,4 +63,71 @@ with tab1:
     col_l, col_r = st.columns([2, 1])
     with col_l:
         # Timeframe Selector directly above the chart
-        tf_choice
+        tf_choice1 = st.radio("Select Window:", ["1M", "3M", "6M", "1Y", "5Y"], index=1, horizontal=True, key="tf_research")
+        window1 = tf_map[tf_choice1]
+
+        plot_data = all_close[selected_ticker].tail(window1)
+        fig_price = px.line(plot_data, template="plotly_dark", title=f"{selected_ticker} - Last {tf_choice1}")
+        fig_price.update_layout(xaxis_title=None, yaxis_title="Price ($)")
+        st.plotly_chart(fig_price, use_container_width=True)
+    
+    with col_r:
+        st.subheader("Key Statistics")
+        st.metric(label="⚠️ Next Earnings (Volatility Alert)", value=e_date, help="High volatility is expected on reporting dates.")
+        st.divider()
+        st.metric("Market Cap", f"${main_info.get('marketCap', 0):,.0f}", help="Total dollar value of all outstanding shares.")
+        st.metric("P/E Ratio (TTM)", main_info.get('trailingPE', 'N/A'), help="Price-to-Earnings ratio valuation.")
+        st.metric("Beta (5Y)", main_info.get('beta', 'N/A'), help="Volatility relative to S&P 500.")
+        st.metric("1Y Target Est", f"${main_info.get('targetMeanPrice', 'N/A')}", help="Consensus analyst price forecast.")
+
+# --- TAB 2: Performance Comparison ---
+with tab2:
+    tf_choice2 = st.radio("Select Window:", ["1M", "3M", "6M", "1Y", "5Y"], index=1, horizontal=True, key="tf_perf")
+    window2 = tf_map[tf_choice2]
+    
+    comp_df = all_close.tail(window2)
+    norm_df = (comp_df / comp_df.iloc[0]) * 100
+    
+    fig_comp = go.Figure()
+    for t in tickers:
+        fig_comp.add_trace(go.Scatter(
+            x=norm_df.index, y=norm_df[t], name=t,
+            line=dict(width=4 if t == selected_ticker else 1, color='white' if t == selected_ticker else None),
+            opacity=1 if t == selected_ticker else 0.5
+        ))
+    fig_comp.update_layout(template="plotly_dark", title=f"Growth of $100 over {tf_choice2}", yaxis_title="Rebased Price")
+    st.plotly_chart(fig_comp, use_container_width=True)
+
+# --- TAB 3: Strategic Optimizer ---
+with tab3:
+    st.subheader("Mean-Variance Scenario Simulator")
+    st.info("💡 Diversification Cap: Max 40% per asset to prevent concentration risk.")
+    
+    # Optimizer doesn't need a timeframe selector as it uses the full historical COV matrix for stability
+    mu_hist = expected_returns.mean_historical_return(all_close)
+    S = risk_models.sample_cov(all_close)
+    
+    in_cols = st.columns(len(tickers))
+    views = {t: in_cols[i].number_input(f"{t} %", value=float(mu_hist[t]*100), step=1.0) for i, t in enumerate(tickers)}
+    
+    try:
+        custom_mu = pd.Series({t: v/100 for t, v in views.items()})
+        ef = EfficientFrontier(custom_mu, S)
+        ef.add_constraint(lambda w: w <= 0.40) # Forced Diversification
+        
+        weights = ef.max_sharpe()
+        cleaned = ef.clean_weights()
+        ret, vol, sha = ef.portfolio_performance()
+        
+        c1, c2 = st.columns([1, 2])
+        with c1:
+            st.write("### Optimal Weights")
+            st.table(pd.Series({k: v for k, v in cleaned.items() if v > 0}, name="Allocation").apply(lambda x: f"{x:.1%}"))
+            st.metric("Expected Return", f"{ret:.1%}")
+            st.metric("Sharpe Ratio", f"{sha:.2f}")
+        with c2:
+            fig_pie = px.pie(names=list(cleaned.keys()), values=list(cleaned.values()), hole=0.4, 
+                             template="plotly_dark", title="Recommended Portfolio Mix")
+            st.plotly_chart(fig_pie, use_container_width=True)
+    except:
+        st.error("Optimization Error: Ensure at least one stock has a positive return expectation.")

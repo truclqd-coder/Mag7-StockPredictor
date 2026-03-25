@@ -19,10 +19,6 @@ This tool integrates live market data with **Mean-Variance Optimization (MVO)** 
 ### 3. Strategic Portfolio Optimizer (Scenario Simulator)
 * **Markowitz Framework:** Calculates the **Maximum Sharpe Ratio** portfolio using the `PyPortfolioOpt` engine.
 * **Active View Simulation:** Allows users to input custom **Expected Returns (%)** to see how the mathematical "optimal" weights shift in real-time.
-
-### 4. Risk Diagnostics (Correlation Heatmap)
-* **Systemic Risk Analysis:** A daily-return correlation matrix to identify sector concentration and diversification gaps within the Mag7.
-
 ---
 
 ## 🛠️ Tech Stack

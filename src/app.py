@@ -12,34 +12,85 @@ try:
 except ImportError:
     OPTIMIZER_AVAILABLE = False
 
-# --- Page Setup ---
+# --- Page Setup & THEME OVERRIDE ---
 st.set_page_config(page_title="Mag7 Quant Terminal", layout="wide")
 
+# Custom CSS for a "Pro-Quant" Look
 st.markdown("""
     <style>
-    [data-testid="stMetricValue"] { font-size: 1.8rem; color: #00ffc8; }
-    .stTabs [data-baseweb="tab-list"] { gap: 24px; }
-    .stTabs [data-baseweb="tab"] { height: 50px; background-color: #1e1e1e; border-radius: 5px; color: white; }
+    /* Main Background and Text */
+    .stApp { background-color: #0e1117; color: #e0e0e0; }
+    
+    /* Sidebar Styling */
+    section[data-testid="stSidebar"] { background-color: #161b22; border-right: 1px solid #30363d; }
+    
+    /* Tab Styling: Bloomberg Blue/Green Accents */
+    .stTabs [data-baseweb="tab-list"] { 
+        gap: 10px; 
+        background-color: #0e1117;
+        padding: 10px 0;
+    }
+    .stTabs [data-baseweb="tab"] { 
+        height: 45px; 
+        background-color: #1c2128; 
+        border-radius: 4px 4px 0 0; 
+        color: #8b949e; 
+        font-weight: 600;
+        border: 1px solid #30363d;
+        padding: 0 20px;
+    }
+    .stTabs [data-baseweb="tab"]:hover { color: #58a6ff; border-color: #58a6ff; }
+    .stTabs [aria-selected="true"] { 
+        background-color: #21262d !important; 
+        color: #58a6ff !important; 
+        border-bottom: 3px solid #58a6ff !important;
+    }
+
+    /* Metric Card Styling */
+    div[data-testid="stMetric"] {
+        background-color: #1c2128;
+        border: 1px solid #30363d;
+        border-radius: 8px;
+        padding: 15px;
+    }
+    div[data-testid="stMetricValue"] { color: #3fb950; font-family: 'Courier New', monospace; }
+    
+    /* Custom Earnings Box */
+    .earnings-box {
+        background: linear-gradient(90deg, #1c2128 0%, #2d333b 100%);
+        border-left: 5px solid #d29922;
+        padding: 15px;
+        border-radius: 4px;
+        margin-bottom: 20px;
+    }
     </style>
     """, unsafe_allow_html=True)
 
-# --- Data Engine (Let yfinance handle the session internally) ---
+# --- Optimized Data Engine ---
+@st.cache_data(ttl=300)
+def fetch_performance_data(ticker, horizon):
+    params = {
+        "1D": {"period": "1d", "interval": "1m"},
+        "5D": {"period": "5d", "interval": "5m"},
+        "7D": {"period": "7d", "interval": "15m"},
+        "1M": {"period": "1mo", "interval": "1h"},
+        "3M": {"period": "3mo", "interval": "1d"},
+        "6M": {"period": "6mo", "interval": "1d"},
+        "1Y": {"period": "1y", "interval": "1d"},
+        "5Y": {"period": "5y", "interval": "1d"}
+    }
+    config = params.get(horizon, {"period": "1y", "interval": "1d"})
+    return yf.download(ticker, **config, multi_level_index=False)['Close']
+
 @st.cache_data(ttl=3600)
-def fetch_global_data(ticker_list):
-    # DOWNLOAD: No manual session passed here anymore
+def fetch_global_meta(ticker_list):
     prices = yf.download(ticker_list, period="5y", multi_level_index=False)['Close']
-    
     meta_store = {}
     for t in ticker_list:
         obj = yf.Ticker(t)
         info = obj.info
-        
-        # Earnings Date Fix
-        e_date = "N/A"
         raw_ts = info.get('earningsTimestamp') or info.get('nextEarningsDate')
-        if raw_ts:
-            e_date = pd.to_datetime(raw_ts, unit='s').strftime('%Y-%m-%d')
-        
+        e_date = pd.to_datetime(raw_ts, unit='s').strftime('%Y-%m-%d') if raw_ts else "N/A"
         meta_store[t] = {
             "Market Cap": info.get('marketCap', 0),
             "P/E": info.get('trailingPE', 'N/A'),
@@ -50,84 +101,79 @@ def fetch_global_data(ticker_list):
 
 # --- Data Initialization ---
 tickers = ["AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "META", "TSLA"]
-tf_map = {"1M": 30, "3M": 90, "6M": 180, "1Y": 365, "5Y": 1825}
+horizons = ["1D", "5D", "7D", "1M", "3M", "6M", "1Y", "5Y"]
 
-st.title("🚀 Mag7 Quant Research & Allocation Terminal")
-selected_ticker = st.sidebar.selectbox("Primary Focus Ticker", tickers)
+st.title("📟 Mag7 Quant Research Terminal")
+selected_ticker = st.sidebar.selectbox("Active Security", tickers)
 
-with st.spinner("Synchronizing Market Data..."):
-    all_close, all_meta = fetch_global_data(tickers)
+with st.spinner("Streaming Market Data..."):
+    all_prices_5y, all_meta = fetch_global_meta(tickers)
 
-# --- App Tabs ---
-tab1, tab2, tab3 = st.tabs(["📈 Performance Analysis", "📊 Mag7 Comparison", "⚖️ Portfolio Optimizer"])
+tab1, tab2, tab3 = st.tabs(["📈 PERFORMANCE", "📊 SECTOR COMPARISON", "⚖️ STRATEGIC OPTIMIZER"])
 
 # --- TAB 1: Performance Analysis ---
 with tab1:
-    col_l, col_r = st.columns([2, 1])
+    col_l, col_r = st.columns([2.5, 1])
     with col_l:
-        choice1 = st.radio("Chart Horizon:", list(tf_map.keys()), index=1, horizontal=True, key="p_tf")
-        plot_data = all_close[selected_ticker].tail(tf_map[choice1])
+        choice1 = st.radio("SELECT TIMEFRAME", horizons, index=3, horizontal=True, key="p_tf")
+        plot_data = fetch_performance_data(selected_ticker, choice1)
         
-        fig_price = px.line(plot_data, template="plotly_dark", title=f"{selected_ticker} Price Action ({choice1})")
-        fig_price.update_traces(line_color='#00ffc8')
-        fig_price.update_layout(xaxis_title=None, yaxis_title="Price ($)")
+        fig_price = px.line(plot_data, template="plotly_dark")
+        fig_price.update_traces(line_color='#58a6ff', line_width=2)
+        fig_price.update_layout(
+            plot_bgcolor='rgba(0,0,0,0)',
+            paper_bgcolor='rgba(0,0,0,0)',
+            xaxis=dict(showgrid=False),
+            yaxis=dict(showgrid=True, gridcolor='#30363d'),
+            margin=dict(l=0, r=0, t=30, b=0)
+        )
         st.plotly_chart(fig_price, use_container_width=True)
     
     with col_r:
-        st.subheader("Asset Intelligence")
         m = all_meta[selected_ticker]
-        st.error(f"⚠️ Next Earnings: **{m['Next Earnings']}**")
-        st.divider()
-        st.metric("Market Capitalization", f"${m['Market Cap']/1e9:,.1f}B")
-        st.metric("P/E Ratio (TTM)", m['P/E'])
-        st.metric("Analyst 1Y Target", f"${m['Target']}")
+        st.markdown(f"""
+            <div class="earnings-box">
+                <small style="color: #8b949e;">UPCOMING EARNINGS</small><br>
+                <span style="font-size: 22px; font-weight: bold;">{m['Next Earnings']}</span>
+            </div>
+        """, unsafe_allow_html=True)
+        
+        st.metric("Market Cap", f"${m['Market Cap']/1e9:,.1f}B")
+        st.metric("P/E Ratio", m['P/E'])
+        st.metric("1Y Price Target", f"${m['Target']}")
 
 # --- TAB 2: Mag7 Comparison ---
 with tab2:
-    st.subheader("Sector-Wide Benchmarking")
-    choice2 = st.radio("Comparison Window:", list(tf_map.keys()), index=1, horizontal=True, key="c_tf")
-    comp_df = all_close.tail(tf_map[choice2])
+    choice2 = st.radio("BENCHMARK HORIZON", horizons, index=3, horizontal=True, key="c_tf")
+    days_map = {"1D": 1, "5D": 5, "7D": 7, "1M": 21, "3M": 63, "6M": 126, "1Y": 252, "5Y": 1260}
+    comp_df = all_prices_5y.tail(days_map[choice2])
     norm_df = (comp_df / comp_df.iloc[0]) * 100
     
-    fig_comp = px.line(norm_df, template="plotly_dark", title=f"Relative Growth Comparison (Base 100)")
-    fig_comp.update_layout(yaxis_title="Rebased Price")
+    fig_comp = px.line(norm_df, template="plotly_dark", color_discrete_sequence=px.colors.qualitative.Safe)
+    fig_comp.update_layout(plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)')
     st.plotly_chart(fig_comp, use_container_width=True)
     
     st.divider()
-    compare_rows = []
-    for t in tickers:
-        m = all_meta[t]
-        compare_rows.append({
-            "Ticker": t,
-            "Next Earnings": m["Next Earnings"],
-            "Market Cap ($B)": round(m['Market Cap']/1e9, 1),
-            "P/E Ratio": m["P/E"],
-            "1Y Target": m["Target"]
-        })
-    st.dataframe(pd.DataFrame(compare_rows), use_container_width=True)
+    df_disp = pd.DataFrame([{"Ticker": t, **all_meta[t]} for t in tickers])
+    st.dataframe(df_disp, use_container_width=True)
 
 # --- TAB 3: Strategic Optimizer ---
 with tab3:
     if not OPTIMIZER_AVAILABLE:
-        st.error("PyPortfolioOpt is not installed.")
+        st.error("Quant Library (PyPortfolioOpt) Missing.")
     else:
-        st.subheader("Mean-Variance Portfolio Strategy")
+        st.subheader("Asset Allocation Model")
         c_in, c_out = st.columns([1, 2])
         with c_in:
-            st.write("### 1. Market Convictions")
-            mu_hist = expected_returns.mean_historical_return(all_close)
-            user_views = {}
-            for t in tickers:
-                user_views[t] = st.number_input(f"{t} Exp. Return %", value=float(mu_hist[t]*100), step=1.0)
-            
-            st.write("### 2. Allocation Logic")
-            target_p = st.slider("Target Portfolio Return %", 5, 100, 25)
-            mode = st.toggle("Maximize Sharpe Ratio", value=False)
+            mu_hist = expected_returns.mean_historical_return(all_prices_5y)
+            user_views = {t: st.number_input(f"{t} Return %", value=float(mu_hist[t]*100), step=1.0) for t in tickers}
+            target_p = st.slider("Target Annual Portfolio Return %", 5, 100, 25)
+            mode = st.toggle("Auto-Optimize (Max Sharpe)", value=False)
 
         with c_out:
             try:
                 mu = pd.Series({t: v/100 for t, v in user_views.items()})
-                S = risk_models.sample_cov(all_close)
+                S = risk_models.sample_cov(all_prices_5y)
                 ef = EfficientFrontier(mu, S)
                 ef.add_constraint(lambda w: w <= 0.40)
                 
@@ -135,14 +181,13 @@ with tab3:
                 cleaned = ef.clean_weights()
                 ret, vol, sha = ef.portfolio_performance()
                 
-                m1, m2, m3 = st.columns(3)
-                m1.metric("Exp. Return", f"{ret:.1%}")
-                m2.metric("Volatility", f"{vol:.1%}")
-                m3.metric("Sharpe Ratio", f"{sha:.2f}")
+                col1, col2, col3 = st.columns(3)
+                col1.metric("Exp. Return", f"{ret:.1%}")
+                col2.metric("Volatility", f"{vol:.1%}")
+                col3.metric("Sharpe Ratio", f"{sha:.2f}")
                 
                 fig_pie = px.pie(names=list(cleaned.keys()), values=list(cleaned.values()), 
-                                 hole=0.5, template="plotly_dark", title="Optimal Allocation")
+                                 hole=0.6, template="plotly_dark", color_discrete_sequence=px.colors.qualitative.Pastel)
                 st.plotly_chart(fig_pie)
-                st.table(pd.Series(cleaned, name="Weight").apply(lambda x: f"{x:.1%}" if x > 0 else "0%"))
-            except Exception as e:
-                st.warning("No valid portfolio for that target.")
+            except:
+                st.warning("Mathematically impossible target—adjust return views.")

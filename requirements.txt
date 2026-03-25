@@ -4,5 +4,5 @@ pandas
 numpy
 plotly
 PyPortfolioOpt
-requests-cache
+requests
 urllib3

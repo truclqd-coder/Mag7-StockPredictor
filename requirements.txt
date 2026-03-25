@@ -4,6 +4,5 @@ pandas
 numpy
 plotly
 PyPortfolioOpt
-scipy
-seaborn
-matplotlib
+requests-cache
+urllib3

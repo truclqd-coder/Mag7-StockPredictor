@@ -91,4 +91,60 @@ with tab2:
         fig_comp.add_trace(go.Scatter(
             x=norm_df.index, y=norm_df[t], name=t,
             line=dict(width=4 if is_focus else 1, color='white' if is_focus else None),
-            opacity=1 if is
+            opacity=1 if is_focus else 0.5
+        ))
+    fig_comp.update_layout(template="plotly_dark", title="Growth of $100 (Rebased)", yaxis_title="Rebased Price")
+    st.plotly_chart(fig_comp, use_container_width=True)
+
+# --- TAB 3: Strategic Optimizer ---
+with tab3:
+    st.subheader("Mean-Variance Scenario Simulator")
+    st.info("💡 Constrained Optimization: Max 40% per asset to ensure diversification.")
+    
+    mu_hist = expected_returns.mean_historical_return(all_close)
+    S = risk_models.sample_cov(all_close)
+    
+    in_cols = st.columns(len(tickers))
+    views = {t: in_cols[i].number_input(f"{t} %", value=float(mu_hist[t]*100), step=1.0) for i, t in enumerate(tickers)}
+    
+    try:
+        custom_mu = pd.Series({t: v/100 for t, v in views.items()})
+        ef = EfficientFrontier(custom_mu, S)
+        
+        # Diversification constraint to prevent 100% NVDA bias
+        ef.add_constraint(lambda w: w <= 0.40) 
+        
+        weights = ef.max_sharpe()
+        cleaned = ef.clean_weights()
+        ret, vol, sha = ef.portfolio_performance()
+        
+        res_l, res_r = st.columns([1, 2])
+        with res_l:
+            st.write("### Optimal Weights")
+            st.table(pd.Series({k: v for k, v in cleaned.items() if v > 0}, name="Allocation").apply(lambda x: f"{x:.1%}"))
+            st.metric("Expected Return", f"{ret:.1%}")
+            st.metric("Sharpe Ratio", f"{sha:.2f}")
+        with res_r:
+            fig_pie = px.pie(names=list(cleaned.keys()), values=list(cleaned.values()), hole=0.4, 
+                             template="plotly_dark", title="Recommended Portfolio Mix")
+            st.plotly_chart(fig_pie, use_container_width=True)
+    except:
+        st.error("Scenario is mathematically impossible. Ensure at least one stock has a positive return.")
+
+# --- TAB 4: Risk Heatmap ---
+with tab4:
+    window = get_timeframe_selector("tf_heat")
+    returns = all_close.tail(window).pct_change().dropna()
+    corr_matrix = returns.corr().round(2)
+    
+    st.subheader("🔥 Systemic Risk Heatmap")
+    
+    fig_heat = px.imshow(
+        corr_matrix, text_auto=True, aspect="auto",
+        color_continuous_scale='RdYlGn', template="plotly_dark"
+    )
+    fig_heat.update_layout(height=500, margin=dict(l=0, r=0, b=0, t=30))
+    st.plotly_chart(fig_heat, use_container_width=True)
+    
+    avg_corr = corr_matrix.values[np.triu_indices_len(corr_matrix, k=1)].mean()
+    st.metric("Average Group Correlation", f"{avg_corr:.2f}", help="Closer to 1.0 means the stocks move in lockstep.")

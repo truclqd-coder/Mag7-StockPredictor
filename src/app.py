@@ -114,14 +114,6 @@ with tab1:
         v4.metric("Ex-Dividend Date", m['ExDiv'], help="Last date to buy to be eligible for the next dividend.")
 
     with col_r:
-        st.metric("Next Earnings", m['NextEarnings'], help="Scheduled date for quarterly financial reporting.")
-        st.metric("Current Price", f"${m['Current']:.2f}", help="Last traded market price.")
-    
-        upside = ((m['Target'] / m['Current']) - 1) * 100 if m['Target'] > 0 else 0
-        st.metric("1Y Price Target", f"${m['Target']:.2f}", delta=f"{upside:.1f}% Upside", help="Average 12-month analyst estimate.")
-        
-        st.metric("Market Cap", f"${m['MarketCap']/1e12:.2f}T", help="Total market value of all outstanding shares.")
-
         st.markdown("### 🏛️ Analyst Rating")
         rating_color = "#3fb950" if "Buy" in m['Rating'] else "#d29922"
         st.markdown(f"""
@@ -133,9 +125,18 @@ with tab1:
         """, unsafe_allow_html=True)
         
         st.divider()
-        st.metric("Beta (β)", f"{m['Beta']:.2f}", help="Sensitivity to S&P 500 moves.")
-        st.metric("Ann. Volatility (σ)", f"{m['Volatility']:.1%}", help="Total risk via price swing intensity.")
+       
+        st.metric("Next Earnings", m['NextEarnings'], help="Scheduled date for quarterly financial reporting.")
+        st.metric("Current Price", f"${m['Current']:.2f}", help="Last traded market price.")
+    
+        upside = ((m['Target'] / m['Current']) - 1) * 100 if m['Target'] > 0 else 0
+        st.metric("1Y Price Target", f"${m['Target']:.2f}", delta=f"{upside:.1f}% Upside", help="Average 12-month analyst estimate.")
+        
+        st.metric("Market Cap", f"${m['MarketCap']/1e12:.2f}T", help="Total market value of all outstanding shares.")
 
+         st.metric("Beta (β)", f"{m['Beta']:.2f}", help="Sensitivity to S&P 500 moves.")
+        st.metric("Ann. Volatility (σ)", f"{m['Volatility']:.1%}", help="Total risk via price swing intensity.")
+        
 # --- TAB 2: Mag7 Comparison ---
 with tab2:
     st.subheader("Sector Benchmark Comparison")

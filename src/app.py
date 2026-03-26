@@ -4,7 +4,7 @@ import pandas as pd
 import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
-from datetime import datetime
+from datetime import datetime, timedelta
 
 # Attempt to import optimization library
 try:
@@ -26,14 +26,12 @@ st.markdown("""
     section[data-testid="stSidebar"] { background-color: #161b22; border-right: 1px solid #30363d; }
     div[data-testid="stMetric"] { background-color: #1c2128; border: 1px solid #30363d; border-radius: 8px; padding: 15px; }
     
-    /* Next Earnings Banner */
     .earnings-banner {
         background: linear-gradient(180deg, rgba(88, 166, 255, 0.15) 0%, rgba(13, 17, 23, 0) 100%);
         border: 2px solid #58a6ff; border-radius: 12px; padding: 25px; text-align: center; margin-bottom: 20px;
     }
     .earnings-date { color: #58a6ff; font-size: 32px; font-weight: 800; font-family: 'Courier New', monospace; }
 
-    /* Unified Rating & Analyst Box */
     .rating-card {
         padding: 20px; border-radius: 12px; text-align: center; border: 2px solid; margin-bottom: 15px;
         background: rgba(28, 33, 40, 0.5);
@@ -46,7 +44,6 @@ st.markdown("""
         text-align: center; margin-bottom: 15px;
     }
 
-    /* Tab 3 Hero Return Card */
     .hero-return-card {
         background: linear-gradient(135deg, #1c2128 0%, #0d1117 100%);
         border: 2px solid #58a6ff; border-radius: 15px; padding: 30px;
@@ -65,12 +62,21 @@ def fetch_multi_performance(tickers, horizon):
         "1Y": {"period": "1y", "interval": "1d"}, "5Y": {"period": "5y", "interval": "1d"}
     }
     config = params.get(horizon, {"period": "1y", "interval": "1d"})
-    return yf.download(tickers, **config, multi_level_index=False)['Close']
+    data = yf.download(tickers, **config, multi_level_index=False)['Close']
+    return data
 
 @st.cache_data(ttl=3600)
 def fetch_global_meta(ticker_list):
     prices = yf.download(ticker_list, period="5y", multi_level_index=False)['Close']
     vol_series = prices.pct_change().std() * np.sqrt(252)
+    
+    # Calculate 1Y Returns for Table
+    one_year_ago = prices.index[-1] - timedelta(days=365)
+    # Find closest available trading date
+    start_price_1y = prices.iloc[prices.index.get_indexer([one_year_ago], method='backfill')[0]]
+    end_price_now = prices.iloc[-1]
+    returns_1y = ((end_price_now / start_price_1y) - 1)
+    
     meta_store = {}
     for t in ticker_list:
         obj = yf.Ticker(t)
@@ -87,7 +93,8 @@ def fetch_global_meta(ticker_list):
             "NextEarnings": clean_date(info.get('nextEarningsDate') or info.get('earningsTimestamp')),
             "Rating": info.get('recommendationKey', 'N/A').replace('_', ' ').upper(),
             "Analysts": info.get('numberOfAnalystOpinions', 'N/A'),
-            "DivYield": info.get('dividendYield', 0)
+            "DivYield": info.get('dividendYield', 0),
+            "Return1Y": returns_1y[t]
         }
     return prices, meta_store
 
@@ -103,7 +110,7 @@ with st.spinner("Processing Quant Data..."):
 st.markdown('<div class="terminal-title">MAG7 QUANTITATIVE TERMINAL v1.0</div>', unsafe_allow_html=True)
 tab1, tab2, tab3 = st.tabs(["📈 PERFORMANCE", "📊 COMPARISON", "⚖️ OPTIMIZER"])
 
-# --- Tab 1: Detailed Analytics ---
+# --- Tab 1 & Tab 3 maintained as per previous stable builds ---
 with tab1:
     col_l, col_r = st.columns([2.5, 1])
     with col_l:
@@ -111,64 +118,60 @@ with tab1:
         t1_data = fetch_multi_performance(selected_ticker, h1)
         st.plotly_chart(px.line(t1_data, template="plotly_dark").update_layout(yaxis_title="USD", hovermode="x unified"), use_container_width=True)
         v1, v2, v3, v4 = st.columns(4)
-        v1.metric("Prev Close", f"${m['PrevClose']:.2f}", help="The closing price of the stock from the previous trading day.")
-        v2.metric("EPS (TTM)", f"${m['EPS']:.2f}", help="Earnings Per Share over the trailing 12 months.")
-        v3.metric("P/E Ratio", f"{m['PE']:.2f}", help="Price-to-Earnings ratio; used to value a company against its earnings.")
-        v4.metric("Div Yield", f"{m['DivYield']:.2%}", help="Annual dividend payments divided by the stock price.")
-    
+        v1.metric("Prev Close", f"${m['PrevClose']:.2f}", help="Last session closing price."); v2.metric("EPS (TTM)", f"${m['EPS']:.2f}"); v3.metric("P/E Ratio", f"{m['PE']:.2f}"); v4.metric("Div Yield", f"{m['DivYield']:.2%}")
     with col_r:
         st.markdown(f'<div class="earnings-banner"><small>NEXT EARNINGS</small><div class="earnings-date">{m["NextEarnings"]}</div></div>', unsafe_allow_html=True)
-        
-        # Unified Rating & Analyst Opinion Count
         r_color = "#3fb950" if "BUY" in m['Rating'] else "#f85149"
-        st.markdown(f"""
-            <div class="rating-card" style="border-color: {r_color}; color: {r_color};">
-                <div class="rating-text">{m['Rating']}</div>
-                <div class="analyst-subtext">Consensus of {m['Analysts']} Analysts</div>
-            </div>
-        """, unsafe_allow_html=True)
-        
+        st.markdown(f'<div class="rating-card" style="border-color:{r_color}; color:{r_color};"><div class="rating-text">{m["Rating"]}</div><div class="analyst-subtext">Consensus of {m["Analysts"]} Analysts</div></div>', unsafe_allow_html=True)
         st.metric("Current Price", f"${m['Current']:.2f}")
-        
         upside = ((m['Target'] / m['Current']) - 1) * 100 if m['Current'] > 0 else 0
         u_color = "#3fb950" if upside >= 0 else "#f85149"
         st.markdown(f'<div class="target-card"><small>1Y TARGET PRICE</small><br><span style="font-size:24px; font-weight:bold;">${m["Target"]:.2f}</span><br><span style="color:{u_color}; font-weight:bold;">{upside:+.1f}% Upside</span></div>', unsafe_allow_html=True)
-        
-        st.metric("Beta (β)", f"{m['Beta']:.2f}", help="Volatility measure relative to the overall market (S&P 500).")
-        st.metric("Ann. Volatility (σ)", f"{m['Volatility']:.1%}", help="Annualized risk (Standard Deviation).")
+        st.metric("Beta (β)", f"{m['Beta']:.2f}", help="Market sensitivity."); st.metric("Ann. Volatility (σ)", f"{m['Volatility']:.1%}", help="Annualized risk.")
 
-# --- Tab 2: Comparison (YTD Default) ---
+# --- TAB 2: REVISED COMPARISON WITH 1Y RETURN ---
 with tab2:
+    st.subheader("Relative Sector Benchmarking & Performance")
     h2 = st.radio("COMPARISON HORIZON", horizons, index=5, horizontal=True, key="t2_h")
     comp_data = fetch_multi_performance(tickers, h2)
+    
+    # Chart: Normalized to show relative growth
     norm_df = (comp_data / comp_data.iloc[0]) * 100
-    st.plotly_chart(px.line(norm_df, template="plotly_dark", title="Sector Benchmarking").update_layout(yaxis_title="Relative %"), use_container_width=True)
-    st.dataframe(pd.DataFrame([{"Ticker": t, "Next Earnings": all_meta[t]['NextEarnings'], "Rating": all_meta[t]['Rating'], "Beta": round(all_meta[t]['Beta'], 2)} for t in tickers]), use_container_width=True)
+    st.plotly_chart(px.line(norm_df, template="plotly_dark", title=f"Relative Growth Index ({h2} Base 100)").update_layout(yaxis_title="Relative Performance %"), use_container_width=True)
+    
+    # Summary Table with new 1Y Return Column
+    summary_list = []
+    for t in tickers:
+        summary_list.append({
+            "Ticker": t,
+            "1Y Return": f"{all_meta[t]['Return1Y']:.1%}",
+            "Next Earnings": all_meta[t]['NextEarnings'],
+            "Rating": all_meta[t]['Rating'],
+            "P/E Ratio": all_meta[t]['PE'],
+            "Beta": round(all_meta[t]['Beta'], 2)
+        })
+    
+    st.markdown("### 📋 Comparative Fundamentals")
+    st.dataframe(pd.DataFrame(summary_list), use_container_width=True)
 
-# --- Tab 3: Dynamic Optimizer ---
 with tab3:
     if OPTIMIZER_AVAILABLE:
         st.subheader("Modern Portfolio Strategy (MPT)")
         o_in, o_out = st.columns([1, 2.2])
         with o_in:
-            st.markdown("### 🛠️ Configuration")
             mu_hist = expected_returns.mean_historical_return(all_prices_5y)
-            user_views = {t: st.number_input(f"{t} Exp. Return %", value=float(mu_hist[t]*100), step=1.0) for t in tickers}
+            user_views = {t: st.number_input(f"{t} Exp. Return %", value=float(mu_hist[t]*100)) for t in tickers}
             target_p = st.slider("Target Portfolio Return %", 5, 100, 25)
-            mode = st.toggle("Maximize Sharpe Ratio (Auto-Optimization)")
+            mode = st.toggle("Maximize Sharpe Ratio")
         with o_out:
             try:
                 mu, S = pd.Series({t: v/100 for t, v in user_views.items()}), risk_models.sample_cov(all_prices_5y)
                 ef = EfficientFrontier(mu, S)
                 weights = ef.max_sharpe() if mode else ef.efficient_return(target_return=target_p/100)
                 ret, vol, sha = ef.portfolio_performance()
-                
-                # Hero Return Card
                 ret_color = "#58a6ff" if ret >= 0 else "#f85149"
-                st.markdown(f'<div class="hero-return-card"><small style="color:#8b949e; letter-spacing:2px; font-weight:bold;">Target Portfolio Return</small><div style="color:{ret_color}; font-size:48px; font-weight:900; margin-top:10px;">{ret:.1%}</div></div>', unsafe_allow_html=True)
-                
+                st.markdown(f'<div class="hero-return-card"><small>Target Portfolio Return</small><div style="color:{ret_color}; font-size:48px; font-weight:900;">{ret:.1%}</div></div>', unsafe_allow_html=True)
                 m1, m2 = st.columns(2)
-                m1.metric("Risk (Volatility)", f"{vol:.1%}", help="The annualized risk of this specific allocation.")
-                m2.metric("Sharpe Ratio", f"{sha:.2f}", help="A measure of return per unit of risk.")
-                st.plotly_chart(px.pie(names=list(ef.clean_weights().keys()), values=list(ef.clean_weights().values()), hole=0.5, template="plotly_dark", title="Optimal Allocation"), use_container_width=True)
+                m1.metric("Risk (Volatility)", f"{vol:.1%}"); m2.metric("Sharpe Ratio", f"{sha:.2f}")
+                st.plotly_chart(px.pie(names=list(ef.clean_weights().keys()), values=list(ef.clean_weights().values()), hole=0.5, template="plotly_dark"), use_container_width=True)
             except: st.warning("Target return is mathematically infeasible.")

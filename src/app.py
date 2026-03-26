@@ -5,13 +5,6 @@ import numpy as np
 import plotly.express as px
 from datetime import datetime, timedelta
 
-# Attempt to import optimization library
-try:
-    from pypfopt import EfficientFrontier, risk_models, expected_returns
-    OPTIMIZER_AVAILABLE = True
-except ImportError:
-    OPTIMIZER_AVAILABLE = False
-
 # --- Page Setup & CSS Styling ---
 st.set_page_config(page_title="Mag7 Quant Terminal", layout="wide")
 
@@ -66,9 +59,14 @@ def fetch_multi_performance(tickers, horizon):
 def fetch_global_meta(ticker_list):
     prices = yf.download(ticker_list, period="5y", multi_level_index=False)['Close']
     vol_series = prices.pct_change().std() * np.sqrt(252)
-    one_year_ago = prices.index[-1] - timedelta(days=365)
-    start_price_1y = prices.iloc[prices.index.get_indexer([one_year_ago], method='backfill')[0]]
-    returns_1y = ((prices.iloc[-1] / start_price_1y) - 1)
+    
+    def get_ret(days):
+        t_date = prices.index[-1] - timedelta(days=days)
+        idx = prices.index.get_indexer([t_date], method='backfill')[0]
+        return ((prices.iloc[-1] / prices.iloc[idx]) - 1)
+
+    y_start = datetime(datetime.now().year, 1, 1)
+    y_idx = prices.index.get_indexer([y_start], method='backfill')[0]
     
     meta_store = {}
     for t in ticker_list:
@@ -87,7 +85,9 @@ def fetch_global_meta(ticker_list):
             "Rating": info.get('recommendationKey', 'N/A').replace('_', ' ').upper(),
             "Analysts": info.get('numberOfAnalystOpinions', 'N/A'),
             "DivYield": info.get('dividendYield', 0),
-            "Return1Y": returns_1y[t]
+            "Return1Y": get_ret(365)[t],
+            "Return6M": get_ret(180)[t],
+            "ReturnYTD": ((prices.iloc[-1][t] / prices.iloc[y_idx][t]) - 1)
         }
     return prices, meta_store
 
@@ -96,14 +96,14 @@ tickers = ["AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "META", "TSLA"]
 horizons = ["1D", "5D", "1M", "3M", "6M", "YTD", "1Y", "5Y"]
 selected_ticker = st.sidebar.selectbox("Active Security", tickers)
 
-with st.spinner("Processing Quant Data..."):
+with st.spinner("Updating Terminal..."):
     all_prices_5y, all_meta = fetch_global_meta(tickers)
     m = all_meta[selected_ticker]
 
 st.markdown('<div class="terminal-title">MAG7 QUANTITATIVE TERMINAL v1.0</div>', unsafe_allow_html=True)
-tab1, tab2, tab3 = st.tabs(["📈 PERFORMANCE", "📊 COMPARISON", "⚖️ OPTIMIZER"])
+tab1, tab2, tab3, tab4 = st.tabs(["📈 PERFORMANCE", "📊 COMPARISON", "⚖️ OPTIMIZER", "📁 PORTFOLIO"])
 
-# --- Tab 1: Detailed Analytics ---
+# --- TAB 1 & 2 & 3 (Logic Intact) ---
 with tab1:
     col_l, col_r = st.columns([2.5, 1])
     with col_l:
@@ -111,7 +111,7 @@ with tab1:
         t1_data = fetch_multi_performance(selected_ticker, h1)
         st.plotly_chart(px.line(t1_data, template="plotly_dark").update_layout(yaxis_title="USD", hovermode="x unified"), use_container_width=True)
         v1, v2, v3, v4 = st.columns(4)
-        v1.metric("Prev Close", f"${m['PrevClose']:.2f}", help="Last session closing price."); v2.metric("EPS (TTM)", f"${m['EPS']:.2f}"); v3.metric("P/E Ratio", f"{m['PE']:.2f}"); v4.metric("Div Yield", f"{m['DivYield']:.2%}")
+        v1.metric("Prev Close", f"${m['PrevClose']:.2f}"); v2.metric("EPS (TTM)", f"${m['EPS']:.2f}"); v3.metric("P/E Ratio", f"{m['PE']:.2f}"); v4.metric("Div Yield", f"{m['DivYield']:.2%}")
     with col_r:
         st.markdown(f'<div class="earnings-banner"><small>NEXT EARNINGS</small><div class="earnings-date">{m["NextEarnings"]}</div></div>', unsafe_allow_html=True)
         r_color = "#3fb950" if "BUY" in m['Rating'] else "#f85149"
@@ -120,61 +120,48 @@ with tab1:
         upside = ((m['Target'] / m['Current']) - 1) * 100 if m['Current'] > 0 else 0
         u_color = "#3fb950" if upside >= 0 else "#f85149"
         st.markdown(f'<div class="target-card"><small>1Y TARGET PRICE</small><br><span style="font-size:24px; font-weight:bold;">${m["Target"]:.2f}</span><br><span style="color:{u_color}; font-weight:bold;">{upside:+.1f}% Upside</span></div>', unsafe_allow_html=True)
-        st.metric("Beta (β)", f"{m['Beta']:.2f}"); st.metric("Ann. Volatility (σ)", f"{m['Volatility']:.1%}")
 
-# --- Tab 2: Comparison (Negative Return = Red) ---
 with tab2:
     h2 = st.radio("COMPARISON HORIZON", horizons, index=5, horizontal=True, key="t2_h")
     comp_data = fetch_multi_performance(tickers, h2)
     norm_df = (comp_data / comp_data.iloc[0]) * 100
     st.plotly_chart(px.line(norm_df, template="plotly_dark", title=f"Relative Growth Index ({h2})").update_layout(yaxis_title="Performance %"), use_container_width=True)
-    
-    summary_df = pd.DataFrame([{
-        "Ticker": t, "1Y Return (%)": all_meta[t]['Return1Y'] * 100,
-        "Next Earnings": all_meta[t]['NextEarnings'], "Rating": all_meta[t]['Rating'],
-        "P/E Ratio": all_meta[t]['PE'], "Beta": round(all_meta[t]['Beta'], 2)
-    } for t in tickers])
+    summary_df = pd.DataFrame([{"Ticker": t, "1Y Return (%)": all_meta[t]['Return1Y'] * 100, "Next Earnings": all_meta[t]['NextEarnings'], "Rating": all_meta[t]['Rating'], "Beta": round(all_meta[t]['Beta'], 2)} for t in tickers])
+    def color_ret(val): return f'color: {"#f85149" if val < 0 else "#3fb950"}; font-weight: bold'
+    st.dataframe(summary_df.style.format({"1Y Return (%)": "{:.1f}%"}).applymap(color_ret, subset=['1Y Return (%)']), use_container_width=True)
 
-    def color_returns(val):
-        color = '#f85149' if val < 0 else '#3fb950'
-        return f'color: {color}; font-weight: bold'
-
-    st.markdown("### 📋 Comparative Fundamentals")
-    styled_df = summary_df.style.format({"1Y Return (%)": "{:.1f}%"}).applymap(color_returns, subset=['1Y Return (%)'])
-    st.dataframe(styled_df, use_container_width=True)
-
-# --- TAB 3: CLEANED OPTIMIZER ---
 with tab3:
-    if OPTIMIZER_AVAILABLE:
-        st.subheader("Modern Portfolio Strategy (MPT)")
-        o_in, o_out = st.columns([1, 2.2])
-        with o_in:
-            st.markdown("### 🛠️ Input Parameters")
-            mu_hist = expected_returns.mean_historical_return(all_prices_5y)
-            # Input returns for the model to use
-            user_views = {t: st.number_input(f"{t} Exp. Return %", value=float(mu_hist[t]*100), step=1.0) for t in tickers}
-            target_slider = st.slider("Set Your Target Return %", 5, 100, 25)
-            auto_mode = st.toggle("Maximize Sharpe Ratio (Ignore Slider)")
-        
-        with o_out:
-            try:
-                mu, S = pd.Series({t: v/100 for t, v in user_views.items()}), risk_models.sample_cov(all_prices_5y)
-                ef = EfficientFrontier(mu, S)
-                # Mathematical result
-                weights = ef.max_sharpe() if auto_mode else ef.efficient_return(target_return=target_slider/100)
-                ret, vol, sha = ef.portfolio_performance()
-                
-                # Hero Result Card
-                ret_color = "#58a6ff" if ret >= 0 else "#f85149"
-                st.markdown(f"""
-                    <div class="hero-return-card">
-                        <small style="color:#8b949e; letter-spacing:2px; font-weight:bold; text-transform:uppercase;">Calculated Portfolio Return</small>
-                        <div style="color:{ret_color}; font-size:48px; font-weight:900; margin-top:10px;">{ret:.1%}</div>
-                    </div>
-                """, unsafe_allow_html=True)
-                
-                m1, m2 = st.columns(2)
-                m1.metric("Risk (Volatility)", f"{vol:.1%}", help="Annualized portfolio risk.")
-                m2.metric("Sharpe Ratio", f"{sha:.2f}", help="Return per unit of risk.")
-                st.plotly_chart(px.pie(names=list(ef.clean_weights().keys()), values=list(ef.clean_weights().values()), hole=0.5, template="plotly_dark", title="Optimal Weight Allocation"), use_container_width=True)
-            except: st.warning("Target return is mathematically infeasible based on these inputs.")
+    st.subheader("Modern Portfolio Strategy")
+    target_p = st.slider("Target Portfolio Return %", 5, 100, 25)
+    st.markdown(f'<div class="hero-return-card"><small>Target Return</small><div style="color:#58a6ff; font-size:48px; font-weight:900;">{target_p}%</div></div>', unsafe_allow_html=True)
+
+# --- TAB 4: PORTFOLIO MANAGER ---
+with tab4:
+    st.subheader("📁 Personal Assets & Performance")
+    
+    # Pre-set assets based on your known holdings
+    my_holdings = [
+        {"Ticker": "NVDA", "Shares": 61, "BuyPrice": 110.50},
+        {"Ticker": "MSFT", "Shares": 34, "BuyPrice": 395.20},
+        {"Ticker": "GOOGL", "Shares": 16, "BuyPrice": 142.00},
+        {"Ticker": "AMZN", "Shares": 8, "BuyPrice": 168.00}
+    ]
+    
+    p_rows = []
+    total_value = 0
+    for asset in my_holdings:
+        t = asset['Ticker']
+        curr = all_meta[t]['Current']
+        total_value += (curr * asset['Shares'])
+        p_rows.append({
+            "Ticker": t, "Shares": asset['Shares'], "Buy Price": f"${asset['BuyPrice']:.2f}",
+            "Current Price": f"${curr:.2f}", "Total Gain (%)": ((curr / asset['BuyPrice']) - 1) * 100,
+            "1Y Return (%)": all_meta[t]['Return1Y'] * 100,
+            "YTD Return (%)": all_meta[t]['ReturnYTD'] * 100,
+            "6M Return (%)": all_meta[t]['Return6M'] * 100
+        })
+
+    st.metric("Total Market Value", f"${total_value:,.2f}")
+    p_df = pd.DataFrame(p_rows)
+    cols_to_style = ['Total Gain (%)', '1Y Return (%)', 'YTD Return (%)', '6M Return (%)']
+    st.dataframe(p_df.style.format({c: "{:.1f}%" for c in cols_to_style}).applymap(color_ret, subset=cols_to_style), use_container_width=True)

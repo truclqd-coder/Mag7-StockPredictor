@@ -96,14 +96,14 @@ tickers = ["AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "META", "TSLA"]
 horizons = ["1D", "5D", "1M", "3M", "6M", "YTD", "1Y", "5Y"]
 selected_ticker = st.sidebar.selectbox("Active Security", tickers)
 
-with st.spinner("Updating Terminal..."):
+with st.spinner("Processing Quant Data..."):
     all_prices_5y, all_meta = fetch_global_meta(tickers)
     m = all_meta[selected_ticker]
 
 st.markdown('<div class="terminal-title">MAG7 QUANTITATIVE TERMINAL v1.0</div>', unsafe_allow_html=True)
 tab1, tab2, tab3, tab4 = st.tabs(["📈 PERFORMANCE", "📊 COMPARISON", "⚖️ OPTIMIZER", "📁 PORTFOLIO"])
 
-# --- TAB 1 & 2 & 3 (Logic Intact) ---
+# --- TAB 1: RESTORED BETA & VOLATILITY ---
 with tab1:
     col_l, col_r = st.columns([2.5, 1])
     with col_l:
@@ -117,10 +117,16 @@ with tab1:
         r_color = "#3fb950" if "BUY" in m['Rating'] else "#f85149"
         st.markdown(f'<div class="rating-card" style="border-color:{r_color}; color:{r_color};"><div class="rating-text">{m["Rating"]}</div><div class="analyst-subtext">Consensus of {m["Analysts"]} Analysts</div></div>', unsafe_allow_html=True)
         st.metric("Current Price", f"${m['Current']:.2f}")
+        
         upside = ((m['Target'] / m['Current']) - 1) * 100 if m['Current'] > 0 else 0
         u_color = "#3fb950" if upside >= 0 else "#f85149"
         st.markdown(f'<div class="target-card"><small>1Y TARGET PRICE</small><br><span style="font-size:24px; font-weight:bold;">${m["Target"]:.2f}</span><br><span style="color:{u_color}; font-weight:bold;">{upside:+.1f}% Upside</span></div>', unsafe_allow_html=True)
+        
+        # RESTORED METRICS
+        st.metric("Beta (β)", f"{m['Beta']:.2f}", help="Sensitivity relative to S&P 500.")
+        st.metric("Ann. Volatility (σ)", f"{m['Volatility']:.1%}", help="Annualized price fluctuation risk.")
 
+# --- TAB 2: COMPARISON ---
 with tab2:
     h2 = st.radio("COMPARISON HORIZON", horizons, index=5, horizontal=True, key="t2_h")
     comp_data = fetch_multi_performance(tickers, h2)
@@ -130,6 +136,7 @@ with tab2:
     def color_ret(val): return f'color: {"#f85149" if val < 0 else "#3fb950"}; font-weight: bold'
     st.dataframe(summary_df.style.format({"1Y Return (%)": "{:.1f}%"}).applymap(color_ret, subset=['1Y Return (%)']), use_container_width=True)
 
+# --- TAB 3: OPTIMIZER ---
 with tab3:
     st.subheader("Modern Portfolio Strategy")
     target_p = st.slider("Target Portfolio Return %", 5, 100, 25)
@@ -137,22 +144,16 @@ with tab3:
 
 # --- TAB 4: PORTFOLIO MANAGER ---
 with tab4:
-    st.subheader("📁 Personal Assets & Performance")
-    
-    # Pre-set assets based on your known holdings
+    st.subheader("📁 Asset Performance Tracker")
     my_holdings = [
         {"Ticker": "NVDA", "Shares": 61, "BuyPrice": 110.50},
         {"Ticker": "MSFT", "Shares": 34, "BuyPrice": 395.20},
         {"Ticker": "GOOGL", "Shares": 16, "BuyPrice": 142.00},
         {"Ticker": "AMZN", "Shares": 8, "BuyPrice": 168.00}
     ]
-    
     p_rows = []
-    total_value = 0
     for asset in my_holdings:
-        t = asset['Ticker']
-        curr = all_meta[t]['Current']
-        total_value += (curr * asset['Shares'])
+        t, curr = asset['Ticker'], all_meta[asset['Ticker']]['Current']
         p_rows.append({
             "Ticker": t, "Shares": asset['Shares'], "Buy Price": f"${asset['BuyPrice']:.2f}",
             "Current Price": f"${curr:.2f}", "Total Gain (%)": ((curr / asset['BuyPrice']) - 1) * 100,
@@ -160,8 +161,6 @@ with tab4:
             "YTD Return (%)": all_meta[t]['ReturnYTD'] * 100,
             "6M Return (%)": all_meta[t]['Return6M'] * 100
         })
-
-    st.metric("Total Market Value", f"${total_value:,.2f}")
     p_df = pd.DataFrame(p_rows)
     cols_to_style = ['Total Gain (%)', '1Y Return (%)', 'YTD Return (%)', '6M Return (%)']
     st.dataframe(p_df.style.format({c: "{:.1f}%" for c in cols_to_style}).applymap(color_ret, subset=cols_to_style), use_container_width=True)

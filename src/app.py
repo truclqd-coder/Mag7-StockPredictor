@@ -12,7 +12,7 @@ try:
 except ImportError:
     OPTIMIZER_AVAILABLE = False
 
-# --- Page Setup & Bloomberg Theme ---
+# --- Page Setup & THEME ---
 st.set_page_config(page_title="Mag7 Quant Terminal", layout="wide")
 
 st.markdown("""
@@ -43,7 +43,7 @@ st.markdown("""
 
 # --- Data Engine ---
 @st.cache_data(ttl=300)
-def fetch_performance_data(ticker, horizon):
+def fetch_multi_performance(tickers, horizon):
     params = {
         "1D": {"period": "1d", "interval": "1m"}, "5D": {"period": "5d", "interval": "5m"},
         "1M": {"period": "1mo", "interval": "1h"}, "3M": {"period": "3mo", "interval": "1d"},
@@ -51,7 +51,8 @@ def fetch_performance_data(ticker, horizon):
         "5Y": {"period": "5y", "interval": "1d"}
     }
     config = params.get(horizon, {"period": "1y", "interval": "1d"})
-    return yf.download(ticker, **config, multi_level_index=False)['Close']
+    data = yf.download(tickers, **config, multi_level_index=False)['Close']
+    return data
 
 @st.cache_data(ttl=3600)
 def fetch_global_meta(ticker_list):
@@ -78,18 +79,17 @@ def fetch_global_meta(ticker_list):
             "NextEarnings": clean_date(info.get('nextEarningsDate') or info.get('earningsTimestamp')),
             "ExDiv": clean_date(info.get('exDividendDate')),
             "DivYield": info.get('dividendYield', 0),
-            "DivRate": info.get('dividendRate', 0),
             "Rating": info.get('recommendationKey', 'N/A').replace('_', ' ').upper(),
             "Analysts": info.get('numberOfAnalystOpinions', 'N/A')
         }
     return prices, meta_store
 
-# --- Logic ---
+# --- Initialization ---
 tickers = ["AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "META", "TSLA"]
 horizons = ["1D", "5D", "1M", "3M", "6M", "1Y", "5Y"]
 selected_ticker = st.sidebar.selectbox("Active Security", tickers)
 
-with st.spinner("Streaming Market Intelligence..."):
+with st.spinner("Synchronizing Terminal Data..."):
     all_prices_5y, all_meta = fetch_global_meta(tickers)
     m = all_meta[selected_ticker]
 
@@ -100,57 +100,58 @@ tab1, tab2, tab3 = st.tabs(["📈 PERFORMANCE", "📊 COMPARISON", "⚖️ OPTIM
 with tab1:
     col_l, col_r = st.columns([2.5, 1])
     with col_l:
-        # Restore Time Horizon Selector
-        choice1 = st.radio("TIME HORIZON", horizons, index=3, horizontal=True, key="p_tf")
-        plot_data = fetch_performance_data(selected_ticker, choice1)
-        fig_price = px.line(plot_data, template="plotly_dark", title=f"{selected_ticker} Price Action ({choice1})")
-        fig_price.update_traces(line_color='#58a6ff', line_width=2)
-        fig_price.update_layout(margin=dict(l=0, r=0, t=30, b=0), height=400)
-        st.plotly_chart(fig_price, use_container_width=True)
+        h1 = st.radio("TIME HORIZON", horizons, index=3, horizontal=True, key="t1_horizon")
+        t1_data = fetch_multi_performance(selected_ticker, h1)
+        fig1 = px.line(t1_data, template="plotly_dark", title=f"{selected_ticker} ({h1})")
+        fig1.update_traces(line_color='#58a6ff', line_width=2)
+        st.plotly_chart(fig1, use_container_width=True)
         
         st.markdown("### 📊 Valuation & Dividends")
         v1, v2, v3, v4 = st.columns(4)
-        v1.metric("EPS (TTM)", f"${m['EPS']:.2f}", help="Earnings Per Share (TTM)")
-        v2.metric("P/E Ratio", f"{m['PE']:.2f}", help="Price-to-Earnings Ratio")
-        v3.metric("Div Yield", f"{m['DivYield']:.2%}", help="Annual Yield")
-        v4.metric("Ex-Div Date", m['ExDiv'], help="Next Ex-Dividend Date")
+        v1.metric("EPS (TTM)", f"${m['EPS']:.2f}"); v2.metric("P/E Ratio", f"{m['PE']:.2f}")
+        v3.metric("Div Yield", f"{m['DivYield']:.2%}"); v4.metric("Ex-Div Date", m['ExDiv'])
 
     with col_r:
-        # High Visibility Rating & Earnings
         r_color = "#3fb950" if "BUY" in m['Rating'] else "#d29922" if "HOLD" in m['Rating'] else "#f85149"
         st.markdown(f'<div class="rating-box" style="border-color: {r_color}; color: {r_color}; background-color: {r_color}11;">{m["Rating"]}<br><small>({m["Analysts"]} Analysts)</small></div>', unsafe_allow_html=True)
         st.markdown(f'<div class="earnings-highlight"><small>NEXT EARNINGS</small><br><span style="font-size: 22px; font-weight: bold; color: #58a6ff;">{m["NextEarnings"]}</span>{"<br><span class=event-risk-tag>⚠️ HIGH EVENT RISK</span>" if m["Volatility"] > 0.35 else ""}</div>', unsafe_allow_html=True)
-        
         st.metric("Current Price", f"${m['Current']:.2f}")
         st.metric("1Y Target", f"${m['Target']:.2f}", delta=f"{((m['Target']/m['Current'])-1)*100:.1f}% Upside")
-        st.metric("Market Cap", f"${m['MarketCap']/1e12:.2f}T")
         st.metric("Ann. Volatility (σ)", f"{m['Volatility']:.1%}")
 
-# --- TAB 2: Comparison ---
+# --- TAB 2: Comparison (Restored & Enhanced) ---
 with tab2:
     st.subheader("Relative Performance (Normalized to 100)")
-    norm_df = (all_prices_5y.tail(252) / all_prices_5y.tail(252).iloc[0]) * 100
-    st.plotly_chart(px.line(norm_df, template="plotly_dark"), use_container_width=True)
+    h2 = st.radio("COMPARISON HORIZON", horizons, index=5, horizontal=True, key="t2_horizon")
+    comp_data = fetch_multi_performance(tickers, h2)
+    
+    # Normalize starting point to 100
+    norm_df = (comp_data / comp_data.iloc[0]) * 100
+    fig2 = px.line(norm_df, template="plotly_dark", title=f"Mag7 Sector Benchmarking ({h2})")
+    st.plotly_chart(fig2, use_container_width=True)
+    
     st.dataframe(pd.DataFrame([{ "Ticker": t, "Rating": all_meta[t]['Rating'], "1Y Return": f"{all_meta[t]['AnnReturn']:.1%}", "P/E": all_meta[t]["PE"], "Beta": round(all_meta[t]['Beta'], 2) } for t in tickers]), use_container_width=True)
 
 # --- TAB 3: Optimizer ---
 with tab3:
-    if not OPTIMIZER_AVAILABLE:
-        st.error("Optimization Library Missing.")
+    if not OPTIMIZER_AVAILABLE: st.error("Optimizer Missing.")
     else:
-        st.subheader("Asset Allocation Model")
+        st.subheader("Mean-Variance Portfolio Optimization")
         c_in, c_out = st.columns([1, 2])
         with c_in:
-            mu = expected_returns.mean_historical_return(all_prices_5y)
-            S = risk_models.sample_cov(all_prices_5y)
-            target_p = st.slider("Target Annual Return %", 5, 100, 25)
+            mu_hist = expected_returns.mean_historical_return(all_prices_5y)
+            user_views = {t: st.number_input(f"{t} Exp. Return %", value=float(mu_hist[t]*100), step=1.0) for t in tickers}
+            target_p = st.slider("Target Portfolio Return %", 5, 100, 25)
+            mode = st.toggle("Maximize Sharpe Ratio", value=False)
         with c_out:
             try:
+                mu = pd.Series({t: v/100 for t, v in user_views.items()})
+                S = risk_models.sample_cov(all_prices_5y)
                 ef = EfficientFrontier(mu, S)
-                weights = ef.efficient_return(target_return=target_p/100)
+                weights = ef.max_sharpe() if mode else ef.efficient_return(target_return=target_p/100)
                 cleaned = ef.clean_weights()
                 ret, vol, sha = ef.portfolio_performance()
-                col1, col2, col3 = st.columns(3)
-                col1.metric("Exp. Return", f"{ret:.1%}"); col2.metric("Volatility", f"{vol:.1%}"); col3.metric("Sharpe", f"{sha:.2f}")
-                st.table(pd.DataFrame([{"Ticker": t, "Weight": f"{w*100:.1f}%"} for t, w in cleaned.items() if w > 0]))
-            except: st.warning("Target return infeasible.")
+                m1, m2, m3 = st.columns(3); m1.metric("Exp. Return", f"{ret:.1%}"); m2.metric("Portfolio Vol", f"{vol:.1%}"); m3.metric("Sharpe", f"{sha:.2f}")
+                final_w = {t: w for t, w in cleaned.items() if w > 0.01}
+                st.plotly_chart(px.pie(names=list(final_w.keys()), values=list(final_w.values()), hole=0.5, template="plotly_dark", title="Optimal Allocation"), use_container_width=True)
+            except: st.warning("Infeasible Portfolio.")

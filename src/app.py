@@ -29,8 +29,7 @@ st.markdown("""
     }
     div[data-testid="stMetric"] { background-color: #1c2128; border: 1px solid #30363d; border-radius: 8px; padding: 15px; }
     div[data-testid="stMetricValue"] { color: #3fb950; font-family: 'Courier New', monospace; }
-    .earnings-box { background: linear-gradient(90deg, #1c2128 0%, #2d333b 100%); border-left: 5px solid #d29922; padding: 15px; border-radius: 4px; margin-bottom: 20px; }
-    /* Blue color for the help question mark */
+    .rating-card { background-color: #1c2128; border: 1px solid #30363d; border-radius: 8px; padding: 15px; margin-top: 10px; }
     .stTooltipIcon { color: #58a6ff !important; }
     </style>
     """, unsafe_allow_html=True)
@@ -50,21 +49,29 @@ def fetch_performance_data(ticker, horizon):
 @st.cache_data(ttl=3600)
 def fetch_global_meta(ticker_list):
     prices = yf.download(ticker_list, period="5y", multi_level_index=False)['Close']
-    vol_series = prices.pct_change().std() * np.sqrt(252)
+    
+    # Quantitative Calculations
+    daily_returns = prices.pct_change().dropna()
+    vol_series = daily_returns.std() * np.sqrt(252)
+    annual_return = (prices.iloc[-1] / prices.iloc[-252] - 1) # 1-Year Trailing Return
+    
     meta_store = {}
     for t in ticker_list:
         obj = yf.Ticker(t)
         info = obj.info
-        raw_ts = info.get('earningsTimestamp') or info.get('nextEarningsDate')
-        e_date = pd.to_datetime(raw_ts, unit='s').strftime('%Y-%m-%d') if raw_ts else "N/A"
+        
+        # Rating Proxy: Using Consensus Recommendation
+        raw_rating = info.get('recommendationKey', 'N/A').replace('_', ' ').title()
+        
         meta_store[t] = {
             "Current": info.get('currentPrice') or info.get('regularMarketPrice'),
             "Target": info.get('targetMeanPrice', 0),
             "Beta": info.get('beta', 1.0),
             "Volatility": vol_series[t],
+            "AnnReturn": annual_return[t],
             "PE": info.get('trailingPE', 'N/A'),
-            "Market Cap": info.get('marketCap', 0),
-            "Next Earnings": e_date
+            "Rating": raw_rating,
+            "Analysts": info.get('numberOfAnalystOpinions', 'N/A')
         }
     return prices, meta_store
 
@@ -73,7 +80,7 @@ tickers = ["AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "META", "TSLA"]
 horizons = ["1D", "5D", "7D", "1M", "3M", "6M", "1Y", "5Y"]
 selected_ticker = st.sidebar.selectbox("Active Security", tickers)
 
-with st.spinner("Streaming Market Data..."):
+with st.spinner("Synchronizing Market Intelligence..."):
     all_prices_5y, all_meta = fetch_global_meta(tickers)
 
 tab1, tab2, tab3 = st.tabs(["📈 PERFORMANCE", "📊 SECTOR COMPARISON", "⚖️ STRATEGIC OPTIMIZER"])
@@ -92,31 +99,31 @@ with tab1:
         st.plotly_chart(fig_price, use_container_width=True)
     
     with col_r:
-        st.markdown(f"""<div class="earnings-box"><small style="color: #8b949e;">UPCOMING EARNINGS</small><br><span style="font-size: 22px; font-weight: bold;">{m['Next Earnings']}</span></div>""", unsafe_allow_html=True)
+        st.metric("Current Price", f"${m['Current']:.2f}", help="Last traded market price.")
         
-        # Metrics with built-in tooltips
-        st.metric("Current Price", f"${m['Current']:.2f}", help="The latest traded market price.")
+        # 1Y Target with Help & Delta
+        upside = ((m['Target'] / m['Current']) - 1) * 100 if m['Target'] > 0 else 0
+        st.metric("1Y Price Target", f"${m['Target']:.2f}", delta=f"{upside:.1f}% Upside", 
+                  help="Average 12-month analyst estimate. (?) Measures predicted growth.")
         
-        # 1Y Target with Upside Calculation
-        try:
-            upside = ((m['Target'] / m['Current']) - 1) * 100
-            delta_label = f"{upside:.1f}% Upside"
-        except: delta_label = None
+        # Ratings Section (Morningstar/Moody's Proxy)
+        st.markdown("### 🏛️ Analyst Rating")
+        rating_color = "#3fb950" if "Buy" in m['Rating'] else "#d29922"
+        st.markdown(f"""
+            <div class="rating-card">
+                <small style="color: #8b949e;">CONSENSUS RECOMMENDATION</small><br>
+                <span style="color: {rating_color}; font-size: 22px; font-weight: bold;">{m['Rating']}</span><br>
+                <small style="color: #8b949e;">Based on {m['Analysts']} Analysts</small>
+            </div>
+        """, unsafe_allow_html=True)
         
-        st.metric("1Y Price Target", f"${m['Target']:.2f}", delta=delta_label, 
-                  help="Average 12-month price estimate from Wall Street analysts.")
-        
-        st.metric("Beta (β)", f"{m['Beta']:.2f}", 
-                  help="Market Sensitivity. >1.0 means it moves more than the S&P 500.")
-        
-        st.metric("Ann. Volatility (σ)", f"{m['Volatility']:.1%}", 
-                  help="Total Risk. Measures the intensity of price swings over the last year.")
-        
-        st.metric("P/E Ratio", f"{m['PE']:.2f}" if isinstance(m['PE'], (int, float)) else "N/A", 
-                  help="Price-to-Earnings Ratio. Shows valuation relative to profits.")
+        st.divider()
+        st.metric("Beta (β)", f"{m['Beta']:.2f}", help="Sensitivity to S&P 500 moves. (?) 1.0 is market average.")
+        st.metric("Ann. Volatility (σ)", f"{m['Volatility']:.1%}", help="Total risk via price swing intensity.")
 
 # --- TAB 2: Mag7 Comparison ---
 with tab2:
+    st.subheader("Sector Benchmark Comparison")
     choice2 = st.radio("BENCHMARK HORIZON", horizons, index=3, horizontal=True, key="c_tf")
     days_map = {"1D": 1, "5D": 5, "7D": 7, "1M": 21, "3M": 63, "6M": 126, "1Y": 252, "5Y": 1260}
     comp_df = all_prices_5y.tail(days_map[choice2])
@@ -125,10 +132,12 @@ with tab2:
     st.plotly_chart(fig_comp, use_container_width=True)
     
     st.divider()
+    # Updated table with Annual Return and Rating
     df_disp = pd.DataFrame([{
         "Ticker": t, 
+        "Rating": all_meta[t]['Rating'],
         "Price": f"${all_meta[t]['Current']:.2f}",
-        "Target": f"${all_meta[t]['Target']:.2f}",
+        "1Y Return": f"{all_meta[t]['AnnReturn']:.1%}",
         "Beta": round(all_meta[t]['Beta'], 2),
         "Vol %": f"{all_meta[t]['Volatility']:.1%}",
         "P/E": all_meta[t]["PE"]
@@ -138,15 +147,15 @@ with tab2:
 # --- TAB 3: Strategic Optimizer ---
 with tab3:
     if not OPTIMIZER_AVAILABLE:
-        st.error("Quant Library (PyPortfolioOpt) Missing.")
+        st.error("Quant Library Missing.")
     else:
-        st.subheader("Asset Allocation Model")
+        st.subheader("Strategic Portfolio Allocation")
         c_in, c_out = st.columns([1, 2])
         with c_in:
             mu_hist = expected_returns.mean_historical_return(all_prices_5y)
             user_views = {t: st.number_input(f"{t} Return %", value=float(mu_hist[t]*100), step=1.0) for t in tickers}
-            target_p = st.slider("Target Annual Portfolio Return %", 5, 100, 25)
-            mode = st.toggle("Auto-Optimize (Max Sharpe)", value=False)
+            target_p = st.slider("Target Portfolio Return %", 5, 100, 25)
+            mode = st.toggle("Maximize Sharpe Ratio", value=False)
 
         with c_out:
             try:
@@ -163,11 +172,7 @@ with tab3:
                 col2.metric("Volatility", f"{vol:.1%}")
                 col3.metric("Sharpe Ratio", f"{sha:.2f}")
                 
-                st.markdown("### 📊 Optimized Asset Allocation")
-                alloc_df = pd.DataFrame([{"Ticker": t, "Weight (%)": f"{w*100:.1f}%"} for t, w in cleaned.items() if w > 0])
-                st.table(alloc_df)
-                
-                fig_pie = px.pie(names=list(cleaned.keys()), values=list(cleaned.values()), hole=0.6, template="plotly_dark")
-                st.plotly_chart(fig_pie)
+                st.table(pd.DataFrame([{"Ticker": t, "Weight": f"{w*100:.1f}%"} for t, w in cleaned.items() if w > 0]))
+                st.plotly_chart(px.pie(names=list(cleaned.keys()), values=list(cleaned.values()), hole=0.6, template="plotly_dark"))
             except:
                 st.warning("Infeasible target.")

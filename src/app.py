@@ -98,7 +98,7 @@ with st.spinner("Processing Quant Data..."):
 st.markdown('<div class="terminal-title">MAG7 QUANTITATIVE TERMINAL v1.0</div>', unsafe_allow_html=True)
 tab1, tab2, tab3, tab4 = st.tabs(["📈 PERFORMANCE", "📊 COMPARISON", "⚖️ OPTIMIZER", "📁 PORTFOLIO"])
 
-# --- TAB 1: PERSISTENT ANALYTICS ---
+# --- TAB 1 (RESTORED BETA/VOL + TOOLTIPS) ---
 with tab1:
     col_l, col_r = st.columns([2.5, 1])
     with col_l:
@@ -114,37 +114,41 @@ with tab1:
         st.metric("Current Price", f"${m['Current']:.2f}")
         upside = ((m['Target'] / m['Current']) - 1) * 100 if m['Current'] > 0 else 0
         st.markdown(f'<div class="target-card"><small>1Y TARGET</small><br><span style="font-size:24px; font-weight:bold;">${m["Target"]:.2f}</span><br><span style="color:{"#3fb950" if upside >=0 else "#f85149"}; font-weight:bold;">{upside:+.1f}% Upside</span></div>', unsafe_allow_html=True)
-        st.metric("Beta (β)", f"{m['Beta']:.2f}"); st.metric("Ann. Volatility (σ)", f"{m['Volatility']:.1%}")
+        st.metric("Beta (β)", f"{m['Beta']:.2f}", help="Measures asset sensitivity to market moves."); st.metric("Ann. Volatility (σ)", f"{m['Volatility']:.1%}", help="Annualized risk based on historical standard deviation.")
 
-# --- TAB 2: COMPARISON (NEGATIVE RETURN = RED) ---
+# --- TAB 2 (STAYED THE SAME) ---
 with tab2:
     def color_ret(val): return f'color: {"#f85149" if val < 0 else "#3fb950"}; font-weight: bold'
     summary_df = pd.DataFrame([{"Ticker": t, "1Y Return (%)": all_meta[t]['Return1Y'] * 100, "Rating": all_meta[t]['Rating'], "Beta": round(all_meta[t]['Beta'], 2)} for t in tickers])
     st.dataframe(summary_df.style.format({"1Y Return (%)": "{:.1f}%"}).applymap(color_ret, subset=['1Y Return (%)']), use_container_width=True)
 
-# --- TAB 3: RESTORED FULL OPTIMIZER ---
+# --- TAB 3 (RESTORED CODES + GLOSSARY) ---
 with tab3:
     if OPTIMIZER_AVAILABLE:
         st.subheader("Modern Portfolio Strategy (MPT)")
         o_in, o_out = st.columns([1, 2.2])
         with o_in:
             mu_hist = expected_returns.mean_historical_return(all_prices_5y)
-            user_views = {t: st.number_input(f"{t} Exp. Return %", value=float(mu_hist[t]*100)) for t in tickers}
-            target_p = st.slider("Target Portfolio Return %", 5, 100, 25)
-            mode = st.toggle("Maximize Sharpe Ratio")
+            user_views = {t: st.number_input(f"{t} Exp. Return %", value=float(mu_hist[t]*100), help=f"Adjust the expected annual return for {t}.") for t in tickers}
+            target_p = st.slider("Target Portfolio Return %", 5, 100, 25, help="Select the annual return goal for the optimizer to solve for.")
+            mode = st.toggle("Maximize Sharpe Ratio", help="Ignores target return to find the most risk-efficient portfolio.")
         with o_out:
             try:
                 mu, S = pd.Series({t: v/100 for t, v in user_views.items()}), risk_models.sample_cov(all_prices_5y)
                 ef = EfficientFrontier(mu, S)
                 weights = ef.max_sharpe() if mode else ef.efficient_return(target_return=target_p/100)
                 ret, vol, sha = ef.portfolio_performance()
-                st.markdown(f'<div class="hero-return-card"><small>Calculated Portfolio Return</small><div style="color:#58a6ff; font-size:48px; font-weight:900;">{ret:.1%}</div></div>', unsafe_allow_html=True)
+                
+                # Hero Card with help text
+                st.markdown(f'<div class="hero-return-card"><small title="The weighted average return of the optimized assets.">CALCULATED PORTFOLIO RETURN</small><div style="color:#58a6ff; font-size:48px; font-weight:900;">{ret:.1%}</div></div>', unsafe_allow_html=True)
+                
                 m1, m2 = st.columns(2)
-                m1.metric("Risk (Volatility)", f"{vol:.1%}"); m2.metric("Sharpe Ratio", f"{sha:.2f}")
-                st.plotly_chart(px.pie(names=list(ef.clean_weights().keys()), values=list(ef.clean_weights().values()), hole=0.5, template="plotly_dark"), use_container_width=True)
-            except: st.warning("Target return is mathematically infeasible.")
+                m1.metric("Risk (Volatility)", f"{vol:.1%}", help="Annualized portfolio standard deviation. Lower is typically safer.")
+                m2.metric("Sharpe Ratio", f"{sha:.2f}", help="The excess return per unit of risk. Higher is better (generally > 1.0 is good).")
+                st.plotly_chart(px.pie(names=list(ef.clean_weights().keys()), values=list(ef.clean_weights().values()), hole=0.5, template="plotly_dark", title="Optimal Asset Allocation"), use_container_width=True)
+            except: st.warning("Target return is mathematically infeasible based on these inputs.")
 
-# --- TAB 4: PORTFOLIO MANAGER ---
+# --- TAB 4 (STAYED THE SAME) ---
 with tab4:
     st.subheader("📁 Personal Asset Tracker")
     my_holdings = [{"Ticker": "NVDA", "Shares": 61, "BuyPrice": 110.50}, {"Ticker": "MSFT", "Shares": 34, "BuyPrice": 395.20}, {"Ticker": "GOOGL", "Shares": 16, "BuyPrice": 142.00}, {"Ticker": "AMZN", "Shares": 8, "BuyPrice": 168.00}]

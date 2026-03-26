@@ -132,15 +132,28 @@ with tab1:
         st.metric("Current Price", f"${m['Current']:.2f}")
         upside = ((m['Target'] / m['Current']) - 1) * 100 if m['Current'] > 0 else 0
         st.markdown(f'<div class="target-card"><small>1Y TARGET</small><br><span style="font-size:24px; font-weight:bold;">${m["Target"]:.2f}</span><br><span style="color:{"#3fb950" if upside >=0 else "#f85149"}; font-weight:bold;">{upside:+.1f}% Upside</span></div>', unsafe_allow_html=True)
-        st.metric("Beta (β)", f"{m['Beta']:.2f}", help="Market sensitivity."); st.metric("Ann. Volatility (σ)", f"{m['Volatility']:.1%}", help="Annualized risk.")
+        st.metric("Beta (β)", f"{m['Beta']:.2f}"); st.metric("Ann. Volatility (σ)", f"{m['Volatility']:.1%}")
 
-# --- TAB 2 (Comparison) ---
+# --- TAB 2 (Enhanced Comparison Table) ---
 with tab2:
     h2 = st.radio("COMPARISON HORIZON", ["1D", "5D", "1M", "3M", "6M", "YTD", "1Y", "5Y"], index=5, horizontal=True, key="t2_h")
     comp_data = yf.download(mag7, period=h2.lower() if 'Y' in h2 else h2, multi_level_index=False)['Close']
     st.plotly_chart(px.line((comp_data / comp_data.iloc[0]) * 100, template="plotly_dark").update_layout(yaxis_title="Index (100)"), use_container_width=True)
+    
     def color_ret(val): return f'color: {"#f85149" if val < 0 else "#3fb950"}; font-weight: bold'
-    summary_df = pd.DataFrame([{"Ticker": t, "1Y Return (%)": all_meta[t]['Return1Y'] * 100, "Rating": all_meta[t]['Rating']} for t in mag7])
+    
+    # Updated Table logic adding Beta and Earnings
+    summary_data = []
+    for t in mag7:
+        summary_data.append({
+            "Ticker": t, 
+            "1Y Return (%)": all_meta[t]['Return1Y'] * 100, 
+            "Beta (β)": round(all_meta[t]['Beta'], 2),
+            "Next Earnings": all_meta[t]['NextEarnings'],
+            "Rating": all_meta[t]['Rating']
+        })
+    
+    summary_df = pd.DataFrame(summary_data)
     st.dataframe(summary_df.style.format({"1Y Return (%)": "{:.1f}%"}).applymap(color_ret, subset=['1Y Return (%)']), use_container_width=True)
 
 # --- TAB 3 (Optimizer) ---
@@ -150,7 +163,7 @@ with tab3:
         o_in, o_out = st.columns([1, 2.2])
         with o_in:
             mu_hist = expected_returns.mean_historical_return(all_prices_5y[mag7])
-            user_views = {t: st.number_input(f"{t} Exp. Return %", value=float(mu_hist[t]*100), help="Adjust views.") for t in mag7}
+            user_views = {t: st.number_input(f"{t} Exp. Return %", value=float(mu_hist[t]*100)) for t in mag7}
             target_p = st.slider("Target Portfolio Return %", 5, 100, 25)
             mode = st.toggle("Maximize Sharpe Ratio")
         with o_out:
@@ -165,7 +178,7 @@ with tab3:
                 st.plotly_chart(px.pie(names=list(ef.clean_weights().keys()), values=list(ef.clean_weights().values()), hole=0.5, template="plotly_dark"), use_container_width=True)
             except: st.warning("Target return infeasible.")
 
-# --- TAB 4 (FULL RESTORATION) ---
+# --- TAB 4 (Full Portfolio) ---
 with tab4:
     st.subheader("📁 Live Asset Portfolio")
     my_holdings = [

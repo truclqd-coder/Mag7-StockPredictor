@@ -51,6 +51,15 @@ st.markdown("""
     """, unsafe_allow_html=True)
 
 # --- Data Engine ---
+@st.cache_data(ttl=300)
+def fetch_multi_performance(ticker_list, horizon):
+    # Mapping horizons to yfinance periods
+    period_map = {"1D":"1d", "5D":"5d", "1M":"1mo", "3M":"3mo", "6M":"6mo", "YTD":"ytd", "1Y":"1y", "5Y":"5y"}
+    p = period_map.get(horizon, "1y")
+    # Download close prices for all tickers
+    data = yf.download(ticker_list, period=p, multi_level_index=False)['Close']
+    return data
+
 @st.cache_data(ttl=3600)
 def fetch_global_meta(ticker_list):
     prices = yf.download(ticker_list, period="5y", multi_level_index=False)['Close']
@@ -89,6 +98,7 @@ def fetch_global_meta(ticker_list):
 
 # --- Initialization ---
 tickers = ["AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "META", "TSLA"]
+horizons = ["1D", "5D", "1M", "3M", "6M", "YTD", "1Y", "5Y"]
 selected_ticker = st.sidebar.selectbox("Active Security", tickers)
 
 with st.spinner("Processing Quant Data..."):
@@ -98,13 +108,13 @@ with st.spinner("Processing Quant Data..."):
 st.markdown('<div class="terminal-title">MAG7 QUANTITATIVE TERMINAL v1.0</div>', unsafe_allow_html=True)
 tab1, tab2, tab3, tab4 = st.tabs(["📈 PERFORMANCE", "📊 COMPARISON", "⚖️ OPTIMIZER", "📁 PORTFOLIO"])
 
-# --- TAB 1 (RESTORED BETA/VOL + TOOLTIPS) ---
+# --- TAB 1: PERSISTENT ANALYTICS ---
 with tab1:
     col_l, col_r = st.columns([2.5, 1])
     with col_l:
-        h1 = st.radio("HORIZON", ["1D", "5D", "1M", "3M", "6M", "YTD", "1Y", "5Y"], index=5, horizontal=True)
-        t1_data = yf.download(selected_ticker, period=h1.lower() if 'Y' in h1 else h1, multi_level_index=False)['Close']
-        st.plotly_chart(px.line(t1_data, template="plotly_dark").update_layout(yaxis_title="USD"), use_container_width=True)
+        h1 = st.radio("HORIZON", horizons, index=5, horizontal=True)
+        t1_data = fetch_multi_performance([selected_ticker], h1)
+        st.plotly_chart(px.line(t1_data, template="plotly_dark").update_layout(yaxis_title="USD", showlegend=False), use_container_width=True)
         v1, v2, v3, v4 = st.columns(4)
         v1.metric("Prev Close", f"${m['PrevClose']:.2f}"); v2.metric("EPS", f"${m['EPS']:.2f}"); v3.metric("P/E Ratio", f"{m['PE']:.2f}"); v4.metric("Div Yield", f"{m['DivYield']:.2%}")
     with col_r:
@@ -114,41 +124,43 @@ with tab1:
         st.metric("Current Price", f"${m['Current']:.2f}")
         upside = ((m['Target'] / m['Current']) - 1) * 100 if m['Current'] > 0 else 0
         st.markdown(f'<div class="target-card"><small>1Y TARGET</small><br><span style="font-size:24px; font-weight:bold;">${m["Target"]:.2f}</span><br><span style="color:{"#3fb950" if upside >=0 else "#f85149"}; font-weight:bold;">{upside:+.1f}% Upside</span></div>', unsafe_allow_html=True)
-        st.metric("Beta (β)", f"{m['Beta']:.2f}", help="Measures asset sensitivity to market moves."); st.metric("Ann. Volatility (σ)", f"{m['Volatility']:.1%}", help="Annualized risk based on historical standard deviation.")
+        st.metric("Beta (β)", f"{m['Beta']:.2f}", help="Sensitivity relative to S&P 500."); st.metric("Ann. Volatility (σ)", f"{m['Volatility']:.1%}", help="Annualized price fluctuation risk.")
 
-# --- TAB 2 (STAYED THE SAME) ---
+# --- TAB 2: FIXED COMPARISON CHART ---
 with tab2:
+    h2 = st.radio("COMPARISON HORIZON", horizons, index=5, horizontal=True, key="t2_h")
+    comp_data = fetch_multi_performance(tickers, h2)
+    # Relative Index (Base 100)
+    norm_df = (comp_data / comp_data.iloc[0]) * 100
+    st.plotly_chart(px.line(norm_df, template="plotly_dark", title=f"Relative Growth Index ({h2})").update_layout(yaxis_title="Index (Start=100)"), use_container_width=True)
+    
     def color_ret(val): return f'color: {"#f85149" if val < 0 else "#3fb950"}; font-weight: bold'
     summary_df = pd.DataFrame([{"Ticker": t, "1Y Return (%)": all_meta[t]['Return1Y'] * 100, "Rating": all_meta[t]['Rating'], "Beta": round(all_meta[t]['Beta'], 2)} for t in tickers])
     st.dataframe(summary_df.style.format({"1Y Return (%)": "{:.1f}%"}).applymap(color_ret, subset=['1Y Return (%)']), use_container_width=True)
 
-# --- TAB 3 (RESTORED CODES + GLOSSARY) ---
+# --- TAB 3: OPTIMIZER (WITH GLOSSARY) ---
 with tab3:
     if OPTIMIZER_AVAILABLE:
         st.subheader("Modern Portfolio Strategy (MPT)")
         o_in, o_out = st.columns([1, 2.2])
         with o_in:
             mu_hist = expected_returns.mean_historical_return(all_prices_5y)
-            user_views = {t: st.number_input(f"{t} Exp. Return %", value=float(mu_hist[t]*100), help=f"Adjust the expected annual return for {t}.") for t in tickers}
-            target_p = st.slider("Target Portfolio Return %", 5, 100, 25, help="Select the annual return goal for the optimizer to solve for.")
-            mode = st.toggle("Maximize Sharpe Ratio", help="Ignores target return to find the most risk-efficient portfolio.")
+            user_views = {t: st.number_input(f"{t} Exp. Return %", value=float(mu_hist[t]*100), help="Adjust expected annual return.") for t in tickers}
+            target_p = st.slider("Target Portfolio Return %", 5, 100, 25, help="Select annual return goal.")
+            mode = st.toggle("Maximize Sharpe Ratio", help="Finds the most risk-efficient portfolio.")
         with o_out:
             try:
                 mu, S = pd.Series({t: v/100 for t, v in user_views.items()}), risk_models.sample_cov(all_prices_5y)
                 ef = EfficientFrontier(mu, S)
                 weights = ef.max_sharpe() if mode else ef.efficient_return(target_return=target_p/100)
                 ret, vol, sha = ef.portfolio_performance()
-                
-                # Hero Card with help text
-                st.markdown(f'<div class="hero-return-card"><small title="The weighted average return of the optimized assets.">CALCULATED PORTFOLIO RETURN</small><div style="color:#58a6ff; font-size:48px; font-weight:900;">{ret:.1%}</div></div>', unsafe_allow_html=True)
-                
+                st.markdown(f'<div class="hero-return-card"><small title="Weighted average return of assets.">CALCULATED PORTFOLIO RETURN</small><div style="color:#58a6ff; font-size:48px; font-weight:900;">{ret:.1%}</div></div>', unsafe_allow_html=True)
                 m1, m2 = st.columns(2)
-                m1.metric("Risk (Volatility)", f"{vol:.1%}", help="Annualized portfolio standard deviation. Lower is typically safer.")
-                m2.metric("Sharpe Ratio", f"{sha:.2f}", help="The excess return per unit of risk. Higher is better (generally > 1.0 is good).")
+                m1.metric("Risk (Volatility)", f"{vol:.1%}", help="Annualized portfolio standard deviation."); m2.metric("Sharpe Ratio", f"{sha:.2f}", help="Excess return per unit of risk (Higher = Better).")
                 st.plotly_chart(px.pie(names=list(ef.clean_weights().keys()), values=list(ef.clean_weights().values()), hole=0.5, template="plotly_dark", title="Optimal Asset Allocation"), use_container_width=True)
-            except: st.warning("Target return is mathematically infeasible based on these inputs.")
+            except: st.warning("Target return is mathematically infeasible.")
 
-# --- TAB 4 (STAYED THE SAME) ---
+# --- TAB 4: PORTFOLIO MANAGER ---
 with tab4:
     st.subheader("📁 Personal Asset Tracker")
     my_holdings = [{"Ticker": "NVDA", "Shares": 61, "BuyPrice": 110.50}, {"Ticker": "MSFT", "Shares": 34, "BuyPrice": 395.20}, {"Ticker": "GOOGL", "Shares": 16, "BuyPrice": 142.00}, {"Ticker": "AMZN", "Shares": 8, "BuyPrice": 168.00}]

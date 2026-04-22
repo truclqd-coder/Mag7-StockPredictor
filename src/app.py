@@ -213,4 +213,4 @@ with tab4:
 
     p_df = pd.DataFrame(p_rows)
     style_cols = ['Open P&L (%)', '1Y Return', 'YTD Return', '6M Return']
-    st.dataframe(p_df.style.format({c: "{:.1f}%" for c in style_cols}).applymap(color_ret, subset=style_cols), use_container_width=True)
+    st.dataframe(p_df.style.format({c: "{:.1f}%" for c in style_cols}).map(color_ret, subset=style_cols), use_container_width=True)

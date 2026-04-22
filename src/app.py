@@ -154,8 +154,7 @@ with tab2:
         })
     
     summary_df = pd.DataFrame(summary_data)
-    st.dataframe(summary_df.style.format({"1Y Return (%)": "{:.1f}%"}).applymap(color_ret, subset=['1Y Return (%)']), use_container_width=True)
-
+    st.dataframe(summary_df.style.format({"1Y Return (%)": "{:.1f}%"}).map(color_ret, subset=['1Y Return (%)']), use_container_width=True)
 # --- TAB 3 (Optimizer) ---
 with tab3:
     if OPTIMIZER_AVAILABLE:

@@ -1,7 +1,8 @@
-streamlit
 yfinance
-pandas
 numpy
-plotly
 PyPortfolioOpt
 curl_cffi
+pandas>=2.1.0
+streamlit>=1.30.0
+plotly
+scikit-learn
